@@ -77,7 +77,9 @@ it is not published, and `brief` says to run it again. With none, `brief` makes 
 which belongs to no deal. A deal is a binding around cards, not a new card format: a deal's card reads
 the account's call and thread only when they are [matched](#matches) to the deal, and is otherwise
 the card the account would get. A closed deal keeps
-its cards, and is never opened again or deleted. The database refuses a card bound to a deal it was
+its cards, and is never opened again or deleted. `deal close` closes one with a person's reason, under a
+`close_deal` receipt, on its final card: the deal's newest card as it closes. The account's next deal is
+a new one, with the next ID. The database refuses a card bound to a deal it was
 not published during, and a restore checks the same.
 
 ## Deal routes
@@ -115,6 +117,7 @@ leaves it out.
 {"id": "thornfield-2027-2e3hke", "account": "acc-003", "account_name": "Thornfield Wren LLP",
  "state": "open", "opportunity": "opp-003", "contract": null, "renews_on": "2027-02-08",
  "registered_by": "PRINCIPAL_ID", "registered_at": "2026-11-21T15:04:05.123456Z", "closed_at": null,
+ "close": null,
  "reads": {"get_account": "RECEIPT_ID", "list_opportunities": "RECEIPT_ID"},
  "latest_card": {"id": "CARD_ID", "brief_id": "brief-...", "published_at": "..."}}
 ```
@@ -123,6 +126,19 @@ leaves it out.
 through the API, or `null` for one `deal new` registered. `reads` are the receipts of the two reads it
 was registered on, which `GET /api/v1/receipts/{receipt}` serves. `latest_card` is `null` until a
 card is published for the deal: by `brief`, by a refresh, or as a brief an assistant prepares.
+
+`close` is `null` while the deal is open. For a closed deal it says how it closed:
+
+```json
+{"basis": "person", "reason": "Renewed for two years", "closed_by": null,
+ "receipt": "RECEIPT_ID", "final_card": "CARD_ID"}
+```
+
+`reason` is the person's own words, neutralized as source text is. `closed_by` is `null` for the owner,
+who closes with `deal close`. `receipt` is the `close_deal` receipt, which
+`GET /api/v1/receipts/{receipt}` serves. `final_card` is the deal's newest card as it closed, or `null`
+for a deal that had none. A deal closed before closes were recorded has `basis` `unrecorded` and the
+other four `null`.
 
 `POST /v1/deals` registers the deal as the signed-in person: both reads name them. The grant is checked
 before any source is opened, and again just before each read. Without a live grant on the account,

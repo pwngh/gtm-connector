@@ -33,10 +33,11 @@ import (
 // free number from 2 after it: thornfield-2027-2e3hke-2.
 
 var dealActions = map[string]arguments{
-	"new":     {options: []option{{name: "--as-of", value: true}}, required: "account_id", help: dealNewHelp},
-	"list":    {help: dealListHelp},
-	"show":    {required: "deal_id", help: dealShowHelp},
-	"close":   {required: "deal_id", help: dealCloseHelp},
+	"new":  {options: []option{{name: "--as-of", value: true}}, required: "account_id", help: dealNewHelp},
+	"list": {options: []option{{name: "--all"}}, help: dealListHelp},
+	"show": {required: "deal_id", help: dealShowHelp},
+	"close": {options: []option{{name: "--reason", value: true}, {name: "--no-card"}, {name: "--as-of", value: true}},
+		required: "deal_id", help: dealCloseHelp},
 	"matches": {options: []option{{name: "--all"}}, help: dealMatchesHelp},
 	"decide": {options: []option{{name: "--deal", value: true}, {name: "--reject"}}, required: "match_id",
 		help: dealDecideHelp},
@@ -151,7 +152,7 @@ func (r *run) newDeal(ctx context.Context) (any, error) {
 	return dealValue(deal)
 }
 
-// listDeals lists the workspace's deals, the open ones first.
+// listDeals lists the workspace's open deals, and with --all the closed ones after them.
 func (r *run) listDeals(ctx context.Context) (any, error) {
 	if err := r.open(ctx); err != nil {
 		return nil, err
@@ -164,7 +165,12 @@ func (r *run) listDeals(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, all := r.args.text("--all")
 	for _, deal := range deals {
+		if deal.State != "open" && !all {
+			r.closed++
+			continue
+		}
 		value, err := dealValue(deal)
 		if err != nil {
 			return nil, err
@@ -243,15 +249,78 @@ func (r *run) showDeal(ctx context.Context) (any, error) {
 	return strictjson.NewObject("deal", value, "card", card, "matches", read), nil
 }
 
-// closeDeal closes an open deal. A closed one is shown as it is.
+// closeDeal closes an open deal as the owner, with their reason. It first makes the deal's final card, as
+// brief makes a card, and the close names that card: when the deal has a newer one by then, or is closed by
+// then, the deal is not closed by this command, and the card it made stays the deal's. With --no-card it
+// reads nothing, and the final card is the newest the deal has. A read that fails leaves the deal open. A
+// closed deal is shown as it is, and an unknown one is refused under a close_deal receipt.
 func (r *run) closeDeal(ctx context.Context) (any, error) {
+	given, has := r.args.text("--reason")
+	if !has {
+		return nil, refused("the following arguments are required: --reason")
+	}
+	reason, err := postgres.CloseReason(given)
+	if err != nil {
+		return nil, refused("A reason is one line of 1 to 500 characters.")
+	}
 	deal, err := r.stored(ctx)
+	if errors.Is(err, errNoDeal) && r.exists {
+		// The refusal has a receipt, as a decision of an unknown match has.
+		_, _, err = r.store.CloseDeal(ctx, postgres.DealClose{WorkspaceID: r.workspace.ID, Ref: r.args.positionals[0],
+			Reason: reason})
+		if errors.Is(err, postgres.ErrNotFound) {
+			err = errNoDeal
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	deal, _, err = r.store.CloseDeal(ctx, r.workspace.ID, deal.Ref)
-	if err != nil {
+	if deal.State != "open" {
+		return dealValue(deal)
+	}
+	closing := postgres.DealClose{WorkspaceID: r.workspace.ID, Ref: deal.Ref, Reason: reason}
+	brief := ""
+	if _, without := r.args.text("--no-card"); !without {
+		from, err := r.reads(ctx)
+		if err != nil {
+			return nil, err
+		}
+		asOf, given := r.args.text("--as-of")
+		if !given {
+			asOf = from.day()
+		}
+		if err := from.open(ctx, "crm", "calls", "slack"); err != nil {
+			return nil, err
+		}
+		r.announce(from.sourcesLine())
+		if err := cards.CheckRequest(from.sources(), deal.AccountRef, asOf); err != nil {
+			return nil, err
+		}
+		sealed, err := from.publish(ctx, cards.Principal{WorkspaceID: r.workspace.ID,
+			TokenID: receipts.Fingerprint(randomToken()), Scopes: []string{"crm:read", "calls:read", "slack:read"}},
+			deal.AccountRef, asOf, deal.Ref)
+		if err != nil {
+			return nil, err
+		}
+		card, err := r.store.CardByBrief(ctx, r.workspace.ID, sealed.BriefID)
+		if err != nil {
+			return nil, err
+		}
+		closing.Card, brief = card.ID, sealed.BriefID
+	}
+	deal, _, err = r.store.CloseDeal(ctx, closing)
+	switch {
+	case errors.Is(err, postgres.ErrDealChanged) && brief != "":
+		return nil, &failure{code: 3, message: "The deal got a newer card, or closed, while this ran, so this " +
+			"command did not close it. The card it made, " + brief + ", stays the deal's. Run the command again."}
+	case errors.Is(err, postgres.ErrDealChanged):
+		return nil, &failure{code: 3, message: "The deal got a newer card, or closed, while this ran, so this " +
+			"command did not close it. Run the command again."}
+	case err != nil:
 		return nil, err
+	}
+	if brief != "" {
+		r.announce("Final card: " + brief + ".")
 	}
 	return dealValue(deal)
 }
@@ -432,9 +501,17 @@ func dealValue(d postgres.Deal) (*strictjson.Object, error) {
 		}
 		return text
 	}
-	var closed, card any
+	var closed, card, how any
 	if d.ClosedAt != nil {
 		closed = utcSeconds(*d.ClosedAt)
+	}
+	if d.Close != nil {
+		reason, _, err := evidence.SafeText(d.Close.Reason)
+		if err != nil {
+			return nil, err
+		}
+		how = strictjson.NewObject("basis", d.Close.Basis, "reason", orNull(reason), "closed_by", orNull(d.Close.By),
+			"receipt", orNull(d.Close.ReceiptID), "final_card", orNull(d.Close.FinalCard))
 	}
 	if d.LatestCard != nil {
 		card = strictjson.NewObject("id", d.LatestCard.ID, "brief_id", d.LatestCard.BriefID,
@@ -443,7 +520,7 @@ func dealValue(d postgres.Deal) (*strictjson.Object, error) {
 	return strictjson.NewObject("id", d.Ref, "account", d.AccountRef, "account_name", name, "state", d.State,
 		"opportunity", orNull(d.OpportunityRef), "contract", orNull(d.ContractRef), "renews_on", orNull(d.RenewsOn),
 		"registered_by", orNull(d.RegisteredBy), "registered_at", utcSeconds(d.RegisteredAt), "closed_at", closed,
-		"reads", strictjson.NewObject("get_account", d.AccountReadID, "list_opportunities", d.OpportunitiesReadID),
+		"close", how, "reads", strictjson.NewObject("get_account", d.AccountReadID, "list_opportunities", d.OpportunitiesReadID),
 		"latest_card", card), nil
 }
 
@@ -452,6 +529,10 @@ func (r *run) dealText(action string, result any) string {
 	if action == "list" {
 		listed := result.([]any)
 		if len(listed) == 0 {
+			if r.closed > 0 {
+				return "No open deals. Register one: gtm-connector deal new ACCOUNT_ID" + r.here() +
+					"\nList the closed ones: gtm-connector deal list --all" + r.here()
+			}
 			return "No deals. Register one: gtm-connector deal new ACCOUNT_ID" + r.here()
 		}
 		rows := make([][]any, len(listed))
@@ -474,6 +555,15 @@ func (r *run) dealText(action string, result any) string {
 		{"Name", strictjson.Quote(get(deal, "account_name").(string))}, {"State", get(deal, "state")},
 		{"Opportunity", orNone(get(deal, "opportunity"))}, {"Contract", orNone(get(deal, "contract"))},
 		{"Renews", orNone(get(deal, "renews_on"))}}
+	if how, _ := get(deal, "close").(*strictjson.Object); how != nil {
+		fields = append(fields, []any{"Closed", get(deal, "closed_at")})
+		if reason, _ := get(how, "reason").(string); reason != "" {
+			fields = append(fields, []any{"Reason", strictjson.Quote(reason)})
+		}
+		if receipt, _ := get(how, "receipt").(string); receipt != "" {
+			fields = append(fields, []any{"Close receipt", receipt}, []any{"Final card", orNone(get(how, "final_card"))})
+		}
+	}
 	// The card names the call and the thread it read, each by its match.
 	for _, value := range read {
 		m := value.(*strictjson.Object)
@@ -713,15 +803,16 @@ options:
 Example: gtm-connector deal new acc-003
 `
 
-const dealListHelp = `usage: gtm-connector deal list [-h] [--json] [--state-dir STATE_DIR]
+const dealListHelp = `usage: gtm-connector deal list [-h] [--json] [--state-dir STATE_DIR] [--all]
 
-List the deals of a workspace, the open ones first.
+List the open deals of a workspace. With --all, list the closed ones after them.
 
 options:
   -h, --help            show this help message and exit
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Read this workspace (default: demo).
+  --all                 List the closed deals too.
 `
 
 const dealShowHelp = `usage: gtm-connector deal show [-h] [--json] [--state-dir STATE_DIR] deal_id
@@ -738,18 +829,27 @@ options:
                         Read this workspace (default: demo).
 `
 
-const dealCloseHelp = `usage: gtm-connector deal close [-h] [--json] [--state-dir STATE_DIR] deal_id
+const dealCloseHelp = `usage: gtm-connector deal close [-h] [--json] [--state-dir STATE_DIR]
+                                --reason REASON [--no-card] [--as-of AS_OF]
+                                deal_id
 
-Close a deal. Its cards and receipts are kept, and brief makes the account's card again.
+Close a deal, with a reason. The close first makes the deal's final card, as brief makes a card, and gets a
+close_deal receipt that names the reason and that card. The deal's cards and receipts are kept, and brief
+makes the account's card again. A read that fails leaves the deal open.
 
 positional arguments:
-  deal_id               The deal's ID, such as thornfield-2027.
+  deal_id               The deal's ID, such as thornfield-2027-2e3hke.
 
 options:
   -h, --help            show this help message and exit
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Read this workspace (default: demo).
+  --reason REASON       Why the deal closes: one line of 1 to 500 characters.
+  --no-card             Read nothing. The final card is the newest the deal has.
+  --as-of AS_OF         The final card's planning date, YYYY-MM-DD.
+
+Example: gtm-connector deal close thornfield-2027-2e3hke --reason "Renewed for two years"
 `
 
 const dealMatchesHelp = `usage: gtm-connector deal matches [-h] [--json] [--state-dir STATE_DIR] [--all]

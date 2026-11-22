@@ -19,16 +19,25 @@ import (
 )
 
 // dealResult is a deal as deal new, list, show and close give it, and as the routes do.
+type dealClosed struct {
+	Basis     string  `json:"basis"`
+	Reason    *string `json:"reason"`
+	ClosedBy  *string `json:"closed_by"`
+	Receipt   *string `json:"receipt"`
+	FinalCard *string `json:"final_card"`
+}
+
 type dealResult struct {
-	ID           string  `json:"id"`
-	Account      string  `json:"account"`
-	AccountName  string  `json:"account_name"`
-	State        string  `json:"state"`
-	Opportunity  *string `json:"opportunity"`
-	Contract     *string `json:"contract"`
-	RenewsOn     *string `json:"renews_on"`
-	RegisteredBy *string `json:"registered_by"`
-	ClosedAt     *string `json:"closed_at"`
+	Close        *dealClosed `json:"close"`
+	ID           string      `json:"id"`
+	Account      string      `json:"account"`
+	AccountName  string      `json:"account_name"`
+	State        string      `json:"state"`
+	Opportunity  *string     `json:"opportunity"`
+	Contract     *string     `json:"contract"`
+	RenewsOn     *string     `json:"renews_on"`
+	RegisteredBy *string     `json:"registered_by"`
+	ClosedAt     *string     `json:"closed_at"`
 	Reads        struct {
 		GetAccount        string `json:"get_account"`
 		ListOpportunities string `json:"list_opportunities"`
@@ -141,12 +150,12 @@ func TestDealCommand(t *testing.T) {
 
 	// Closing keeps the deal and its card; the account's next card is its own, with the same text.
 	var closed dealResult
-	d.result(t, &closed, "deal", "close", "thornfield-2027-2e3hke")
+	d.result(t, &closed, "deal", "close", "thornfield-2027-2e3hke", "--reason", "Renewed", "--no-card")
 	if closed.State != "closed" || closed.ClosedAt == nil || closed.LatestCard == nil {
 		t.Fatalf("deal close: %+v", closed)
 	}
 	var again dealResult
-	d.result(t, &again, "deal", "close", "thornfield-2027-2e3hke")
+	d.result(t, &again, "deal", "close", "thornfield-2027-2e3hke", "--reason", "Renewed", "--no-card")
 	if again.State != "closed" || text(again.ClosedAt) != text(closed.ClosedAt) {
 		t.Errorf("closing twice: %+v", again)
 	}
@@ -177,20 +186,29 @@ func TestDealCommand(t *testing.T) {
 	if next.ID != "thornfield-2027-2e3hke-2" || next.State != "open" {
 		t.Errorf("the next deal of acc-003: %+v", next)
 	}
+	// A closed deal leaves the list, and --all lists it after the open ones.
 	var listed []dealResult
 	d.result(t, &listed, "deal", "list")
-	if len(listed) != 2 || listed[0].ID != "thornfield-2027-2e3hke-2" || listed[1].ID != "thornfield-2027-2e3hke" {
+	if len(listed) != 1 || listed[0].ID != "thornfield-2027-2e3hke-2" {
 		t.Errorf("deal list: %+v", listed)
 	}
-	code, stdout, _ = d.read(t, "deal", "list")
+	d.result(t, &listed, "deal", "list", "--all")
+	if len(listed) != 2 || listed[0].ID != "thornfield-2027-2e3hke-2" || listed[1].ID != "thornfield-2027-2e3hke" {
+		t.Errorf("deal list --all: %+v", listed)
+	}
+	code, stdout, _ = d.read(t, "deal", "list", "--all")
 	if code != 0 || stdout != "thornfield-2027-2e3hke-2\tacc-003\tThornfield Wren LLP\topen\t2027-02-08\n"+
 		"thornfield-2027-2e3hke\tacc-003\tThornfield Wren LLP\tclosed\t2027-02-08\n" {
+		t.Errorf("deal list --all as text:\n%s", stdout)
+	}
+	code, stdout, _ = d.read(t, "deal", "list")
+	if code != 0 || stdout != "thornfield-2027-2e3hke-2\tacc-003\tThornfield Wren LLP\topen\t2027-02-08\n" {
 		t.Errorf("deal list as text:\n%s", stdout)
 	}
 	if _, message, _ := d.refusal(t, 2, "deal", "show", "thornfield"); !strings.Contains(message, "thornfield-2027-2e3hke") {
 		t.Errorf("deal show of a malformed ID: %s", message)
 	}
-	if _, message, _ := d.refusal(t, 2, "deal", "close", "alder-2027-he2vbf"); message != "No deal of this workspace has that ID." {
+	if _, message, _ := d.refusal(t, 2, "deal", "close", "alder-2027-he2vbf", "--reason", "Renewed", "--no-card"); message != "No deal of this workspace has that ID." {
 		t.Errorf("deal close of an unknown ID: %s", message)
 	}
 }
@@ -477,7 +495,7 @@ func TestDealOnSalesforce(t *testing.T) {
 	if text(deal.Contract) != "ctr-sf-800000000000002AAA" || text(deal.RenewsOn) != "2031-05-06" {
 		t.Fatalf("deal new with no --as-of: %+v", deal)
 	}
-	d.result(t, &deal, append([]string{"deal", "close", deal.ID}, where...)...)
+	d.result(t, &deal, append([]string{"deal", "close", deal.ID, "--reason", "Renewed", "--no-card"}, where...)...)
 	d.result(t, &deal, append([]string{"deal", "new", account, "--as-of", "2031-05-07"}, where...)...)
 	if text(deal.Contract) != "ctr-sf-800000000000003AAA" {
 		t.Fatalf("deal new planned from the day after: %+v", deal)
@@ -744,7 +762,7 @@ func TestRefreshPublishesANewCardForTheDeal(t *testing.T) {
 		}
 	}
 	// A closed deal is not refreshed.
-	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	reply, body = refresh(b, deal.ID, nil)
 	var closed struct{ Error struct{ Code string } }
 	json.Unmarshal(body, &closed)
@@ -794,14 +812,15 @@ func TestARefreshedCardIsOnlyTheDealsAskedFor(t *testing.T) {
 	}
 	before := every()
 	// The deal closed, and the account's next one is open.
-	d.result(t, &first, "deal", "close", first.ID)
+	d.result(t, &first, "deal", "close", first.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-003")
 	if err := publish(first.ID, nil); !errors.Is(err, postgres.ErrDealChanged) || every() != before {
 		t.Errorf("a card for a deal that closed before it was read: %v, %d cards", err, every()-before)
 	}
 	// The deal closes while its card is read, and the account has none open as the card is published.
 	closing := func() {
-		if _, _, err := d.owner.CloseDeal(ctx, d.workspace.ID, second.ID); err != nil {
+		if _, _, err := d.owner.CloseDeal(ctx, postgres.DealClose{WorkspaceID: d.workspace.ID, Ref: second.ID,
+			Reason: "Renewed"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -812,7 +831,7 @@ func TestARefreshedCardIsOnlyTheDealsAskedFor(t *testing.T) {
 	d.result(t, &third, "deal", "new", "acc-003")
 	var fourth dealResult
 	swapping := func() {
-		d.result(t, &third, "deal", "close", third.ID)
+		d.result(t, &third, "deal", "close", third.ID, "--reason", "Renewed", "--no-card")
 		d.result(t, &fourth, "deal", "new", "acc-003")
 	}
 	if err := publish(third.ID, swapping); !errors.Is(err, postgres.ErrDealChanged) || every() != before {
@@ -820,5 +839,158 @@ func TestARefreshedCardIsOnlyTheDealsAskedFor(t *testing.T) {
 	}
 	if n := d.count(t, `SELECT count(*) FROM deal_cards WHERE deal_ref = $1`, fourth.ID); n != 0 {
 		t.Errorf("the next deal got %d cards of a refresh of the one before it", n)
+	}
+}
+
+// deal close closes a deal as the owner with a reason. It first makes the deal's final card, as brief makes
+// one, and the close gets a close_deal receipt that names the reason and that card. --no-card reads nothing,
+// and the final card is the newest the deal has, or none. A close with no reason, and one whose read is
+// refused, leave the deal open. A closed deal has left the list, and the account's next deal is a new one.
+func TestCloseMakesTheFinalCardAndRecordsWhy(t *testing.T) {
+	d := setUpDemo(t)
+	d.connectDemo(t, defaultWorkspace)
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-003")
+	if code, _, _ := d.read(t, "brief", "acc-003"); code != 0 {
+		t.Fatalf("brief: exit %d", code)
+	}
+	cards := func() int { return d.count(t, "SELECT count(*) FROM deal_cards WHERE deal_ref = $1", deal.ID) }
+	receipts := func() int { return d.count(t, "SELECT count(*) FROM receipts WHERE tool = 'close_deal'") }
+
+	// With no reason, or one that is not a line of 1 to 500 characters, nothing is read and nothing closes.
+	if _, message, _ := d.refusal(t, 2, "deal", "close", deal.ID); !strings.Contains(message, "--reason") {
+		t.Errorf("deal close with no reason: %s", message)
+	}
+	for _, reason := range []string{"", "  ", "two\nlines", strings.Repeat("r", 501)} {
+		if _, message, _ := d.refusal(t, 2, "deal", "close", deal.ID, "--reason", reason); message !=
+			"A reason is one line of 1 to 500 characters." {
+			t.Errorf("deal close --reason %q: %s", reason, message)
+		}
+	}
+	// An unknown deal is refused under a receipt that names no account.
+	if _, message, _ := d.refusal(t, 2, "deal", "close", "alder-2027-he2vbf", "--reason", "Renewed"); message !=
+		"No deal of this workspace has that ID." {
+		t.Errorf("deal close of an unknown deal: %s", message)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE tool = 'close_deal' AND status = 'error'
+		AND http_status = 403 AND error = 'not_permitted' AND account_ref IS NULL
+		AND arguments ->> 'deal' = 'alder-2027-he2vbf'`); n != 1 {
+		t.Errorf("the refused close of an unknown deal left %d receipts, of 1", n)
+	}
+	// A final card that is refused leaves the deal open.
+	if code, _, _ := d.read(t, "deal", "close", deal.ID, "--reason", "Renewed", "--as-of", "soon", "--json"); code != 2 {
+		t.Errorf("deal close with a day that is none: exit %d", code)
+	}
+	if cards() != 1 || receipts() != 1 || d.count(t, "SELECT count(*) FROM deals WHERE state = 'closed'") != 0 {
+		t.Fatalf("after the refusals: %d cards, %d close receipts", cards(), receipts())
+	}
+
+	code, stdout, stderr := d.read(t, "deal", "close", deal.ID, "--reason", " Renewed for two years, see https://example.com/signed ")
+	if code != 0 || !strings.HasPrefix(stdout, "ID\t"+deal.ID+"\n") || !strings.Contains(stdout, "\nState\tclosed\n") {
+		t.Fatalf("deal close: exit %d\n%s%s", code, stdout, stderr)
+	}
+	var closed dealResult
+	d.result(t, &closed, "deal", "close", deal.ID, "--reason", "Asked again")
+	how := closed.Close
+	if closed.State != "closed" || closed.ClosedAt == nil || how == nil || how.Basis != "person" || how.ClosedBy != nil ||
+		how.Receipt == nil || how.FinalCard == nil || closed.LatestCard == nil || *how.FinalCard != closed.LatestCard.ID {
+		t.Fatalf("the closed deal: %+v %+v", closed, how)
+	}
+	if stderr != "Sources: CRM, calls, and Slack are demo data.\nFinal card: "+closed.LatestCard.BriefID+".\n" {
+		t.Errorf("deal close said:\n%s", stderr)
+	}
+	// The reason is a person's words: stored as given, shown inert.
+	if d.count(t, "SELECT count(*) FROM deals WHERE ref = $1 AND close_reason = 'Renewed for two years, see https://example.com/signed'", deal.ID) != 1 {
+		t.Errorf("the reason is not stored as it was given, trimmed")
+	}
+	if text(how.Reason) != "Renewed for two years, see [link example.com]" {
+		t.Errorf("the reason as shown: %q", text(how.Reason))
+	}
+	// The final card was made by this close, for this deal, and the receipt names it and the reason.
+	if cards() != 2 {
+		t.Errorf("the deal has %d cards, and the close made its second", cards())
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE id = $1 AND tool = 'close_deal' AND status = 'ok'
+		AND principal_id IS NULL AND account_ref = 'acc-003' AND arguments ->> 'deal' = $2
+		AND arguments ->> 'reason' = 'Renewed for two years, see https://example.com/signed' AND arguments ->> 'final_card' = $3`,
+		*how.Receipt, deal.ID, *how.FinalCard); n != 1 || receipts() != 2 {
+		t.Errorf("the close's receipt: %d of %d name the deal, the reason and the final card", n, receipts())
+	}
+	code, stdout, _ = d.read(t, "deal", "show", deal.ID)
+	if code != 0 || !strings.Contains(stdout, "State\tclosed\n") || !strings.Contains(stdout, "\nClosed\t"+*closed.ClosedAt+"\n") ||
+		!strings.Contains(stdout, "\nReason\t\"Renewed for two years, ") ||
+		!strings.Contains(stdout, "\nClose receipt\t"+*how.Receipt+"\nFinal card\t"+*how.FinalCard+"\n") {
+		t.Errorf("deal show of a closed deal:\n%s", stdout)
+	}
+	if code, stdout, _ := d.read(t, "deal", "list"); code != 0 || stdout != "No open deals. Register one: gtm-connector "+
+		"deal new ACCOUNT_ID\nList the closed ones: gtm-connector deal list --all\n" {
+		t.Errorf("deal list after the only deal closed:\n%s", stdout)
+	}
+
+	// The account's next deal is a new one. With no card and --no-card it closes on none, and reads nothing.
+	var next dealResult
+	d.result(t, &next, "deal", "new", "acc-003")
+	before := d.count(t, "SELECT count(*) FROM receipts")
+	code, stdout, stderr = d.read(t, "deal", "close", next.ID, "--reason", "Registered by mistake", "--no-card", "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("deal close --no-card: exit %d\n%s", code, stderr)
+	}
+	var bare dealResult
+	if err := json.Unmarshal([]byte(stdout), &bare); err != nil {
+		t.Fatal(err)
+	}
+	if next.ID != deal.ID+"-2" || bare.State != "closed" || bare.Close == nil || bare.Close.FinalCard != nil ||
+		bare.LatestCard != nil || d.count(t, "SELECT count(*) FROM receipts")-before != 1 {
+		t.Errorf("a deal closed with no card: %+v %+v", bare, bare.Close)
+	}
+	d.everyToolIsNamed(t)
+}
+
+// The deal routes give a closed deal with how it closed: the basis, the reason shown inert, the receipt and
+// the final card. A person granted the account reads the close's receipt, and a person with no grant on it
+// does not.
+func TestAClosedDealShowsItsCloseThroughTheRoutes(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	digest := sha256.Sum256([]byte("outsider-password-0123456789-abcdef"))
+	outsider, err := d.owner.EnsureDemoPrincipal(ctx, d.workspace, "demo-outsider", "Demo outsider", digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, outsider.ID, "acc-001"); err != nil {
+		t.Fatal(err)
+	}
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-003")
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Lost, see https://example.com/why")
+
+	b := signInToDemo(t, app)
+	var one struct{ Deal dealResult }
+	if err := json.Unmarshal(b.get("/v1/deals/"+deal.ID), &one); err != nil {
+		t.Fatal(err)
+	}
+	how := one.Deal.Close
+	if one.Deal.State != "closed" || how == nil || how.Basis != "person" || text(how.Reason) != "Lost, see [link example.com]" ||
+		how.ClosedBy != nil || how.Receipt == nil || one.Deal.LatestCard == nil || text(how.FinalCard) != one.Deal.LatestCard.ID {
+		t.Fatalf("GET /v1/deals/%s: %+v %+v", deal.ID, one.Deal, how)
+	}
+	var listed struct{ Deals []dealResult }
+	if err := json.Unmarshal(b.get("/v1/deals"), &listed); err != nil || len(listed.Deals) != 1 ||
+		listed.Deals[0].Close == nil || text(listed.Deals[0].Close.Reason) != "Lost, see [link example.com]" {
+		t.Errorf("GET /v1/deals: %+v %v", listed, err)
+	}
+	if reply := b.send(http.MethodGet, "/api/v1/receipts/"+*how.Receipt, nil, nil); reply.StatusCode != http.StatusOK {
+		t.Errorf("the close's receipt, for a person granted the account: %d", reply.StatusCode)
+	}
+	o := signInAs(t, app, "demo-outsider", "outsider-password-0123456789-abcdef")
+	if reply := o.send(http.MethodGet, "/api/v1/receipts/"+*how.Receipt, nil, nil); reply.StatusCode != http.StatusForbidden {
+		t.Errorf("the close's receipt, for a person with no grant on the account: %d", reply.StatusCode)
 	}
 }

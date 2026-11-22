@@ -330,9 +330,9 @@ which `--json` prints as the routes give it.
 | Command | What it does |
 | --- | --- |
 | `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. It then matches the account's imported call and mapped thread ([setting it up](config.md#what-is-built-today)). `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
-| `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
+| `deal list [--all]` | Lists the workspace's open deals: ID, account, name, state and the day it renews. `--all` lists the closed ones after them. |
 | `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. A `Read call` or `Read thread` row names each call and thread that card read, by its match, with `decided again` when a later decision replaced it. `--json` gives `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`, the card without its evidence or `null` before `brief` has made one, and the matches as [the API](api.md#matches) gives them. When the newest card is a brief an assistant prepared through MCP, the command shows no card for it: `card` is `null`, the deal carries `latest_card_prepared: true`, and text output names `brief` as the way to make a card to read here. |
-| `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
+| `deal close DEAL_ID --reason TEXT [--no-card] [--as-of YYYY-MM-DD]` | Closes the deal, with a reason: one line of 1 to 500 characters. It first makes the deal's final card, as `brief` makes a card, then closes the deal on that card and names it on stderr as `Final card: BRIEF_ID.` The close gets a `close_deal` receipt that names the deal, the reason and the final card, and `deal show` prints them. `--no-card` reads nothing: the final card is the newest the deal has, or none. A read that fails leaves the deal open. The deal's cards and receipts are kept, the deal leaves `deal list`, and the account's next card is its own again until `deal new` registers its next deal. Closing a closed deal prints it as it is. |
 | `deal matches [--all]` | Lists the matches that wait for a person on a call or thread a card could still read: ID, kind, item, account, state, deal and candidate deals. `--all` lists every call's and thread's current decision, and marks a stale one, whose item is no longer the account's current import or mapping. |
 | `deal decide MATCH_ID (--deal DEAL_ID \| --reject)` | Decides a match as the owner: onto one deal of its account, or off every card. The decision gets a `decide_match` receipt and supersedes the match. |
 
@@ -351,7 +351,10 @@ Renews       2027-02-08
 An account has one open deal at a time: `deal new` for an account with one exits `3`, and names
 `deal list`. An account the CRM does not hold exits `2` with `account not found: ACCOUNT_ID`, and an
 ID of the wrong form for the CRM exits `2`, as `brief` does. `deal show` and `deal close` of an ID the
-workspace does not hold exit `2`. `deal decide` of an unknown match, or onto a deal of another
+workspace does not hold exit `2`, as does `deal close` with no `--reason` or with one that is not one
+line of 1 to 500 characters. `deal close` exits `3` when the deal got a newer card or closed while it ran: the
+deal is not closed by that command, the card it made stays the deal's, and the message says to run it
+again. `deal close` of an unknown deal leaves a `close_deal` receipt, refused. `deal decide` of an unknown match, or onto a deal of another
 account, exits `2`, and of a match a later decision superseded exits `3`. Each action takes
 `--state-dir NAME`, `--json` and `--help`.
 

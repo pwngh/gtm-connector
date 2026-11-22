@@ -56,8 +56,18 @@ type dealView struct {
 	RegisteredBy *string       `json:"registered_by"`
 	RegisteredAt string        `json:"registered_at"`
 	ClosedAt     *string       `json:"closed_at"`
+	Close        *dealClose    `json:"close"`
 	Reads        dealReads     `json:"reads"`
 	LatestCard   *dealCardView `json:"latest_card"`
+}
+
+// dealClose is how a deal closed. A deal closed before closes were recorded has the basis alone.
+type dealClose struct {
+	Basis     string  `json:"basis"`
+	Reason    *string `json:"reason"`
+	ClosedBy  *string `json:"closed_by"`
+	Receipt   *string `json:"receipt"`
+	FinalCard *string `json:"final_card"`
 }
 
 type dealReads struct {
@@ -71,7 +81,8 @@ type dealCardView struct {
 	PublishedAt string `json:"published_at"`
 }
 
-// viewDeal is a deal as the routes give it. The account's name is source text, neutralized here.
+// viewDeal is a deal as the routes give it. The account's name is source text, and the reason it closed for
+// a person's words: both are neutralized here.
 func viewDeal(d postgres.Deal) (dealView, error) {
 	name, _, err := evidence.SafeText(d.AccountName)
 	if err != nil {
@@ -83,6 +94,14 @@ func viewDeal(d postgres.Deal) (dealView, error) {
 		Reads: dealReads{d.AccountReadID, d.OpportunitiesReadID}}
 	if d.LatestCard != nil {
 		view.LatestCard = &dealCardView{d.LatestCard.ID, d.LatestCard.BriefID, stamp(d.LatestCard.PublishedAt)}
+	}
+	if d.Close != nil {
+		reason, _, err := evidence.SafeText(d.Close.Reason)
+		if err != nil {
+			return dealView{}, err
+		}
+		view.Close = &dealClose{Basis: d.Close.Basis, Reason: optional(reason), ClosedBy: optional(d.Close.By),
+			Receipt: optional(d.Close.ReceiptID), FinalCard: optional(d.Close.FinalCard)}
 	}
 	return view, nil
 }
