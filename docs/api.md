@@ -138,9 +138,10 @@ and the answer is `403 not_permitted`. With no CRM connected the answer is
 ## Matches
 
 A match says which deal of its account an imported call or a mapped Slack thread belongs to. [Setting
-it up](config.md#what-is-built-today) gives the rule. The connector decides each one once, and a person
-may decide it again; each decision is a new match that supersedes the one before, under its own
-`decide_match` receipt.
+it up](config.md#what-is-built-today) gives the rule. The connector decides each one once, and a second
+time only to make a thread or a call with no time wait between a closed deal and the open one. A person
+may decide it again. Each later decision is a new match that supersedes the one before, under its own
+`decide_match` receipt, whose `match` argument names the one it supersedes.
 
 ```json
 {"id": "MATCH_ID", "kind": "call", "item": "note-...", "account": "acc-007", "account_name": "...",
@@ -153,9 +154,9 @@ may decide it again; each decision is a new match that supersedes the one before
 | --- | --- |
 | `kind`, `item` | `call` and the import ID (`debug calls inspect` shows it), or `thread` and the mapping's ID |
 | `at` | The call's time, or the time of the thread's parent message; `null` for a call with none |
-| `candidates` | The deals of the account that hold that time, oldest first |
+| `candidates` | The deals of the account that hold that time, oldest first. For `deal_closed`, the closed deal the item was on and the deal open when it was decided. A person's decision keeps the candidates of the match it supersedes |
 | `state` | `matched` to `deal`, `waiting` for a person, or `rejected`, which keeps it off every card |
-| `basis` | `only_deal` (the account has had one deal), `within_deal` (the time is that deal's), `time_unknown` (it fits more than one deal), or `person` |
+| `basis` | `only_deal` (the account has had one deal), `within_deal` (the time is that deal's), `time_unknown` (it fits more than one deal), `deal_closed` (a thread, or a call with no time, whose deal is closed while the account's next deal is open), or `person` |
 | `decided_by` | The principal who decided, or `null` for the connector or the owner |
 | `supersedes` | The match this decision replaced, or `null` |
 | `receipt` | The `decide_match` receipt of the decision, which `GET /api/v1/receipts/{receipt}` serves |

@@ -13,11 +13,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// A match says which deal an account's call or Slack thread belongs to (0014_deal_matches.sql). The item is
-// the account's active call import or its mapped thread. While the account has an open deal, the connector
-// decides each item once, from the item's time: the deal that holds that time takes it (each deal holds the
-// times from its registration to the next deal's), and an item with no time fits every deal of the account,
-// so when the account has had more than one deal it waits for a person and reaches no card.
+// A match says which deal an account's call or Slack thread belongs to (the deal_matches migrations). The
+// item is the account's active call import or its mapped thread. While the account has an open deal, the
+// connector decides each item from the item's time: the deal that holds that time takes it (each deal holds
+// the times from its registration to the next deal's), and an item with no time fits every deal of the
+// account, so when the account has had more than one deal it waits for a person and reaches no card.
+// A thread goes on after its parent message, and a call with no time fits every deal, so the time of neither
+// settles its deal for good: when such an item is on a closed deal while the account has an open one, it
+// fits both and waits for a person (basis deal_closed), at its first decision or by a second one.
 // A person may decide any item again, onto one deal of its account or onto none. Each decision is a row with
 // its own receipt, and the latest decision of an item is its current one.
 
@@ -30,11 +33,12 @@ type Match struct {
 	AccountName string
 	// At is the item's time: the call's, or the thread's parent message. Nil for a call with none.
 	At *time.Time
-	// Candidates are the deals of the account that hold the item's time, oldest first.
+	// Candidates are the deals of the account the item fits, oldest first: those that hold its time, or for
+	// basis deal_closed the closed deal it was on and the deal open when it was decided.
 	Candidates []string
 	// State is "matched", "waiting" or "rejected". DealRef is the deal of a matched item.
 	State, DealRef string
-	// Basis is why: "only_deal", "within_deal", "time_unknown" or "person".
+	// Basis is why: "only_deal", "within_deal", "time_unknown", "deal_closed" or "person".
 	Basis string
 	// DecidedBy is the principal who decided, or "" for the connector or the owner.
 	DecidedBy string
@@ -167,12 +171,14 @@ func (s *Store) failDecision(ctx context.Context, r Receipt, status int, code st
 // open deal, and gives the decisions it made. Each gets a decide_match receipt, committed before the
 // decision, that names the item, the decision and the deal; the decision and the receipt's finish commit
 // together, with the account's deals held as they were read. An item another run decided meanwhile is left
-// to that decision.
+// to that decision. Then it asks again about each thread and each call with no time that is on a closed deal
+// (see askAgain).
 func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) ([]Match, error) {
 	if !validUUID(workspaceID) {
 		return nil, ErrNotFound
 	}
-	if _, open, err := s.OpenDeal(ctx, workspaceID, account); err != nil || !open {
+	open, isOpen, err := s.OpenDeal(ctx, workspaceID, account)
+	if err != nil || !isOpen {
 		return nil, err
 	}
 	items, err := accountItems(ctx, s.pool, workspaceID, account, true)
@@ -189,10 +195,13 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 			workspaceID, account, item.at).Scan(&candidates, &deals); err != nil {
 			return made, err
 		}
-		state, deal, basis := "waiting", "", "time_unknown"
+		state, deal, basis, fits := "waiting", "", "time_unknown", candidates
 		switch {
 		case len(candidates) == 0:
 			continue // the account's deal closed meanwhile
+		case len(candidates) == 1 && candidates[0] != open.Ref && item.kind == "thread":
+			// The closed deal holds the parent message's time, and the thread may go on into the open one.
+			basis, fits = "deal_closed", []string{candidates[0], open.Ref}
 		case len(candidates) == 1 && deals == 1:
 			state, deal, basis = "matched", candidates[0], "only_deal"
 		case len(candidates) == 1:
@@ -219,6 +228,9 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 			if fmt.Sprint(now) != fmt.Sprint(candidates) {
 				return ErrDealChanged
 			}
+			if err := stillOpen(ctx, tx, open); err != nil {
+				return err
+			}
 			if _, err := finishLocked(ctx, tx, ReceiptFinish{ReceiptID: receipt.ID, LeaseToken: receipt.LeaseToken,
 				Status: "ok", HTTPStatus: 200}, false); err != nil {
 				return err
@@ -227,7 +239,7 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 				INSERT INTO deal_matches (workspace_id, kind, item, account_ref, at, candidates, state, deal_ref,
 					basis, receipt_id)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-				workspaceID, item.kind, item.item, account, item.at, candidates, state, nullable(deal), basis,
+				workspaceID, item.kind, item.item, account, item.at, fits, state, nullable(deal), basis,
 				receipt.ID).Scan(&id)
 		})
 		if err != nil {
@@ -238,6 +250,111 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 			return made, errors.Join(err, failed)
 		}
 		m, err := s.Match(ctx, workspaceID, id)
+		if err != nil {
+			return made, err
+		}
+		made = append(made, m)
+	}
+	again, err := s.askAgain(ctx, run, open)
+	return append(made, again...), err
+}
+
+// stillOpen gives ErrDealChanged when a deal read before the transaction is no longer the account's open deal
+// in it.
+func stillOpen(ctx context.Context, tx pgx.Tx, open Deal) error {
+	var is bool
+	err := tx.QueryRow(ctx, `SELECT true FROM deals WHERE workspace_id = $1 AND ref = $2 AND state = 'open'`,
+		open.WorkspaceID, open.Ref).Scan(&is)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrDealChanged
+	}
+	return err
+}
+
+// askAgain decides again, as waiting, each current item of the open deal's account whose time does not settle
+// its deal, a thread or a call with no time, that is matched to a closed deal: by the connector, or by a
+// person before the open deal was registered. Such an item fits the closed deal and the open one, so it
+// waits for a person, with both as its candidates, under a decide_match receipt that names the decision it
+// supersedes. A person who keeps it on the closed deal once the open one is registered is not asked again.
+func (s *Store) askAgain(ctx context.Context, run *decisionRun, open Deal) ([]Match, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.id, m.kind, m.item, m.deal_ref FROM deal_matches m
+		  JOIN deals c ON c.workspace_id = m.workspace_id AND c.ref = m.deal_ref AND c.state = 'closed'
+		  JOIN deals o ON o.workspace_id = m.workspace_id AND o.ref = $3 AND o.state = 'open'
+		 WHERE m.workspace_id = $1 AND m.account_ref = $2 AND m.state = 'matched'
+		   AND (m.kind = 'thread' OR m.at IS NULL) AND (m.basis <> 'person' OR m.decided_at < o.registered_at)
+		   AND NOT EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id)
+		   AND CASE m.kind
+			WHEN 'call' THEN EXISTS (SELECT 1 FROM call_import_active a WHERE a.workspace_id = m.workspace_id
+				AND a.account_ref = m.account_ref AND a.import_id = m.item)
+			ELSE EXISTS (SELECT 1 FROM slack_mappings t WHERE t.workspace_id = m.workspace_id
+				AND t.account_ref = m.account_ref AND t.mapping::jsonb ->> 'mapping_id' = m.item) END
+		 ORDER BY m.kind`, open.WorkspaceID, open.AccountRef, open.Ref)
+	if err != nil {
+		return nil, err
+	}
+	type decided struct{ id, kind, item, deal string }
+	stale, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (decided, error) {
+		var d decided
+		return d, row.Scan(&d.id, &d.kind, &d.item, &d.deal)
+	})
+	if err != nil {
+		return nil, err
+	}
+	var made []Match
+	for _, before := range stale {
+		receipt, err := s.startDecision(ctx, run, open.WorkspaceID, "", open.AccountRef, map[string]any{
+			"kind": before.kind, "item": before.item, "decision": "waiting", "deal": nil, "match": before.id})
+		if err != nil {
+			return made, err
+		}
+		var id string
+		err = s.inTx(ctx, func(tx pgx.Tx) error {
+			// A close or a registration of the account's deals waits for this decision, and so does a card
+			// being published that names the match, or another decision of it.
+			if _, err := tx.Exec(ctx, `SELECT 1 FROM deals WHERE workspace_id = $1 AND account_ref = $2 FOR SHARE`,
+				open.WorkspaceID, open.AccountRef); err != nil {
+				return err
+			}
+			var superseded bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM deal_matches WHERE workspace_id = $1 AND supersedes = $2)
+				FROM deal_matches WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, open.WorkspaceID, before.id).
+				Scan(&superseded); err != nil {
+				return err
+			}
+			if superseded {
+				return ErrMatchDecided
+			}
+			if err := stillOpen(ctx, tx, open); err != nil {
+				return err
+			}
+			if _, err := finishLocked(ctx, tx, ReceiptFinish{ReceiptID: receipt.ID, LeaseToken: receipt.LeaseToken,
+				Status: "ok", HTTPStatus: 200}, false); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, `
+				INSERT INTO deal_matches (workspace_id, kind, item, account_ref, at, candidates, state, basis,
+					supersedes, receipt_id)
+				SELECT workspace_id, kind, item, account_ref, at, $3, 'waiting', 'deal_closed', id, $4
+				  FROM deal_matches WHERE workspace_id = $1 AND id = $2
+				RETURNING id`, open.WorkspaceID, before.id, []string{before.deal, open.Ref}, receipt.ID).Scan(&id)
+		})
+		if err != nil {
+			// Another run or a person decided it meanwhile, or the deal closed or the item stopped being the
+			// account's current one, which the database refuses: each is left as it is. Anything else fails.
+			status, code := 500, "request_failed"
+			switch {
+			case errors.Is(err, ErrMatchDecided) || sqlState(err) == "23505":
+				status, code = 409, "already_decided"
+			case errors.Is(err, ErrDealChanged) || sqlState(err) == "GT023":
+				status, code = 409, "source_changed"
+			}
+			if failed := s.failDecision(ctx, receipt, status, code); status != 409 || failed != nil {
+				return made, errors.Join(err, failed)
+			}
+			continue
+		}
+		m, err := s.Match(ctx, open.WorkspaceID, id)
 		if err != nil {
 			return made, err
 		}
