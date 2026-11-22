@@ -99,6 +99,10 @@ type Opened struct {
 	// Generations is the generation of each source's connection that Source was opened under. A call whose
 	// receipt starts under another generation is refused and reads nothing.
 	Generations map[string]int64
+	// Card, when set, readies this view for a card of one account and gives the store the card is published
+	// through: one that binds it to the account's open deal, with the matches of the calls and threads it
+	// read. Nil publishes through the tools' own store, which binds a card to no deal.
+	Card func(ctx context.Context, account string) (receipts.Store, error)
 }
 
 // server is the tools of one workspace.

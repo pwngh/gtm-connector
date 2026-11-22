@@ -389,6 +389,21 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	return card, nil
 }
 
+// preparedBrief is whether a stored card is a brief an assistant prepared.
+func (r *run) preparedBrief(ctx context.Context, brief string) (bool, error) {
+	stored, err := r.store.CardByBrief(ctx, r.workspace.ID, brief)
+	if err != nil {
+		return false, err
+	}
+	payload, err := receipts.ParsePayload(stored.Bytes)
+	return err == nil && payload.Prepared, nil
+}
+
+// errPreparedBrief refuses to show a brief an assistant prepared: the assistant reads it back, and the
+// commands show cards brief or demo saved.
+var errPreparedBrief = refused("This brief was prepared by an assistant with prepare_renewal_brief, which reads it " +
+	"back with read_renewal_brief. inspect reads cards saved by brief or demo.")
+
 // publish reads one account's sources for the principal and publishes its card. The card belongs to the deal
 // open for the account when it is published, found in its publication, and a card of an account with none
 // is the account's own. The account's calls and threads are matched first, and the card reads only those
@@ -573,8 +588,7 @@ func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) 
 		return nil, refused("%s", cards.ErrInvalidCard)
 	}
 	if get(card, "kind") == "selected_brief" {
-		return nil, refused("This brief was prepared by an assistant with prepare_renewal_brief, which reads it " +
-			"back with read_renewal_brief. inspect reads cards saved by brief or demo.")
+		return nil, errPreparedBrief
 	}
 	log := cards.StoreLog{Store: &postgres.ReceiptStore{Store: r.store}, WorkspaceID: r.workspace.ID}
 	if _, err := cards.VerifyCard(ctx, stored.Bytes, brief, log, bound); err != nil {

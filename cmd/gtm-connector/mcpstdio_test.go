@@ -643,3 +643,124 @@ func TestStdioCommandFinishesEveryReceiptAtTheEndOfInput(t *testing.T) {
 		}
 	}
 }
+
+// A brief an assistant prepares for an account with an open deal is the deal's card: it is bound to the deal
+// as it is published, it reads the account's imported call only when the call is matched to that deal, and
+// deal show names it as the deal's newest card. With no open deal the brief is the account's own, as before.
+func TestABriefPreparedThroughMCPBelongsToItsDeal(t *testing.T) {
+	d := stdioDemo(t)
+	if code, _, stderr := d.read(t, "connect", "calls", "--seller", "Morgan Reed"); code != 0 {
+		t.Fatalf("connect calls: %s", stderr)
+	}
+	if code, _, stderr := d.line(t, "debug", "calls", "import", callFile(t, "call.vtt", "We will sign the renewal soon."),
+		"--account", "acc-007", "--called-at", "2020-01-10T15:00:00Z"); code != 0 {
+		t.Fatalf("import: %s", stderr)
+	}
+	file := filepath.Join(t.TempDir(), "selection.json")
+	if err := os.WriteFile(file, []byte(`{"schema_version": 1, "accounts": [{"account_id": "acc-007", "slack": true}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepare := func() string {
+		t.Helper()
+		p := startStdio(t, d, "--scope", "crm:read", "--scope", "calls:read", "--scope", "slack:read", "--selection", file)
+		p.send(stdioStart, stdioReady, stdioCall(2, "prepare_renewal_brief", `{"account_id":"acc-007"}`))
+		p.answer(1)
+		prepared := p.answer(2)
+		p.stop()
+		records, _ := dig(prepared, "result", "structuredContent", "records").([]any)
+		if dig(prepared, "result", "isError") != false || len(records) != 1 {
+			t.Fatalf("prepare_renewal_brief %v", prepared)
+		}
+		id, _ := dig(records[0], "id").(string)
+		return id
+	}
+	dealOf := func(brief string) string {
+		t.Helper()
+		deal, err := d.owner.DealOfBrief(ctx, d.workspace.ID, brief)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return deal
+	}
+	// With no deal, the brief is the account's own.
+	if deal := dealOf(prepare()); deal != "" {
+		t.Fatalf("a brief of an account with no deal belongs to %s", deal)
+	}
+	// With a deal open, the brief is the deal's card, and names the match of the call it read.
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-007")
+	brief := prepare()
+	if got := dealOf(brief); got != deal.ID {
+		t.Fatalf("a brief of an account with an open deal belongs to %q, not %s", got, deal.ID)
+	}
+	if n := d.count(t, `SELECT count(*) FROM deal_card_matches l JOIN cards c ON c.id = l.card_id
+		JOIN deal_matches m ON m.id = l.match_id WHERE c.brief_id = $1 AND m.kind = 'call' AND m.deal_ref = $2`,
+		brief, deal.ID); n != 1 {
+		t.Errorf("the deal's brief names %d matches of the call it read", n)
+	}
+	// The brief is the deal's newest card: deal show names it and the match it read. The assistant reads the
+	// brief back, so the command shows no card text for it and says how to make one to read here.
+	var shown shownWithMatches
+	d.result(t, &shown, "deal", "show", deal.ID)
+	if shown.Deal.LatestCard == nil || shown.Deal.LatestCard.BriefID != brief || shown.Card != nil ||
+		len(shown.Matches) != 1 || shown.Matches[0].Kind != "call" {
+		t.Fatalf("deal show after the assistant's brief: %+v", shown)
+	}
+	if code, stdout, stderr := d.read(t, "deal", "show", deal.ID); code != 0 ||
+		!strings.Contains(stdout, "a brief an assistant prepared") || !strings.Contains(stdout, "gtm-connector brief acc-007") {
+		t.Fatalf("deal show as text: exit %d\n%s%s", code, stdout, stderr)
+	}
+	// A card brief makes then is the newest, and deal show prints it.
+	if code, _, stderr := d.read(t, "brief", "acc-007"); code != 0 {
+		t.Fatalf("brief: %s", stderr)
+	}
+	d.result(t, &shown, "deal", "show", deal.ID)
+	if shown.Deal.LatestCard == nil || shown.Deal.LatestCard.BriefID == brief || shown.Card == nil {
+		t.Fatalf("deal show after brief: %+v", shown)
+	}
+	// The account's next deal does not hold the call's time, so its brief does not read the call.
+	d.result(t, &deal, "deal", "close", deal.ID)
+	var second dealResult
+	d.result(t, &second, "deal", "new", "acc-007")
+	brief = prepare()
+	if got := dealOf(brief); got != second.ID {
+		t.Fatalf("the next deal's brief belongs to %q", got)
+	}
+	if n := d.count(t, `SELECT count(*) FROM gaps g JOIN cards c ON c.id = g.card_id
+		WHERE c.brief_id = $1 AND g.code = 'calls_not_matched'`, brief); n != 1 {
+		t.Errorf("the next deal's brief does not say the call is not matched to it: %d", n)
+	}
+	if n := d.count(t, `SELECT count(*) FROM deal_card_matches l JOIN cards c ON c.id = l.card_id WHERE c.brief_id = $1`,
+		brief); n != 0 {
+		t.Errorf("the next deal's brief names %d matches", n)
+	}
+	// A brief read for a deal is that deal's or is not saved: the store it is published through requires the
+	// deal that was open when the call's view was readied.
+	opened, err := toolSources(d.owner, d.workspace)(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	through, err := opened.Card(ctx, "acc-007")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound := through.(*postgres.ReceiptStore).OpenDeal; bound == nil || bound.Ref != second.ID || !bound.Required {
+		t.Errorf("a brief of an account with an open deal is published through %+v", bound)
+	}
+	if through, err = opened.Card(ctx, "acc-001"); err != nil {
+		t.Fatal(err)
+	}
+	if bound := through.(*postgres.ReceiptStore).OpenDeal; bound == nil || bound.Required {
+		t.Errorf("a brief of an account with no deal is published through %+v", bound)
+	}
+	// With the CRM detached, deal show still names the deal's newest card as an assistant's brief.
+	if code, _, stderr := d.read(t, "connect", "demo", "--remove"); code != 0 {
+		t.Fatalf("detach the demo book: %s", stderr)
+	}
+	var detached shownWithMatches
+	d.result(t, &detached, "deal", "show", second.ID)
+	if detached.Deal.LatestCard == nil || detached.Deal.LatestCard.BriefID != brief || detached.Card != nil {
+		t.Errorf("deal show with the CRM detached: %+v", detached)
+	}
+	d.everyToolIsNamed(t)
+}
