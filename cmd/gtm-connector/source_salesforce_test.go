@@ -279,6 +279,7 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		"source_identity_mismatch:") {
 		t.Errorf("accounts as another user: %s", message)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // connect salesforce takes as --org only what an sf alias may be, and saves and shows it only once sf org
@@ -478,6 +479,7 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 		WHERE w.slug = 'invented-books'`); saved != len(books) || len(books) != 78 {
 		t.Errorf("%d cards were saved of %d", saved, len(books))
 	}
+	d.everyToolIsNamed(t)
 }
 
 // Before an org is connected, debug salesforce check --sf-org checks the sign-in, the environment and each
@@ -559,6 +561,7 @@ func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 		metadata+" search_accounts:ok:200: find_renewal_candidate:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // A cancel while connect waits on sf ends sf and everything it started, and saves nothing.
@@ -700,6 +703,7 @@ func TestEachSalesforceConnectRequestHasItsReceiptFirst(t *testing.T) {
 	if got := d.audited(t, "ordered-books"); got != strings.Join(finished, " ") {
 		t.Errorf("the receipts: %s", got)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // accounts gives one object with or without --query, on demo data and on Salesforce: the accounts and

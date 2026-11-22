@@ -185,6 +185,7 @@ func TestCallsAreMatchedToTheirDeal(t *testing.T) {
 		t.Errorf("a card read a waiting call: %s", gaps)
 	}
 
+	d.everyToolIsNamed(t)
 }
 
 // The same story as the API reads it, in the workspace the demo sign-in belongs to.
@@ -592,6 +593,7 @@ func TestAMappedThreadIsMatchedToItsDeal(t *testing.T) {
 	if n := d.count(t, `SELECT count(*) FROM gtm_integrity_violations()`); n != 0 {
 		t.Errorf("%d integrity violations", n)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // A call with no time fits every deal of its account. One the account's only deal took waits for a person

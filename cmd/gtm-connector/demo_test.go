@@ -383,3 +383,23 @@ func conn(t *testing.T, url string) *pgx.Conn {
 	t.Cleanup(func() { c.Close(context.Background()) })
 	return c
 }
+
+// everyToolIsNamed fails when the reporting view shows a receipt of this database under no tool name: every
+// receipt a command writes is of a tool the connector defines, which the view names.
+func (d *demoDatabase) everyToolIsNamed(t *testing.T) {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, d.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var unnamed []string
+	var receipts int
+	if err := conn.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT r.tool) FILTER (WHERE v.tool = '<invalid>'), '{}'),
+		count(*) FROM receipts r JOIN reporting.receipts v ON v.receipt_id = r.id`).Scan(&unnamed, &receipts); err != nil {
+		t.Fatal(err)
+	}
+	if len(unnamed) != 0 || receipts == 0 {
+		t.Errorf("reporting.receipts names no tool for %q, of %d receipts", unnamed, receipts)
+	}
+}

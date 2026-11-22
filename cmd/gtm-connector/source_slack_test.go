@@ -804,6 +804,7 @@ func TestSlackFromSignInToACard(t *testing.T) {
 			t.Errorf("a credential reached the output or the database")
 		}
 	}
+	d.everyToolIsNamed(t)
 }
 
 // slackRefused runs a command that must fail with this exit code, and gives its message.
@@ -1221,6 +1222,7 @@ func TestSlackSignInRequestsRunUnderReceipts(t *testing.T) {
 		AND r.connection_id IS NULL`); n != 4 {
 		t.Errorf("the receipts are not each command's slack:read run of no connection: %d", n)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // A new approval is saved only once the person at the command's terminal says yes to the Slack user, team
@@ -1437,4 +1439,5 @@ func TestAGrantTheSignInDoesNotKeepIsRevoked(t *testing.T) {
 		!strings.Contains(text, "one use") {
 		t.Errorf("the timeout says: %s", text)
 	}
+	d.everyToolIsNamed(t)
 }

@@ -319,6 +319,7 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 			t.Errorf("the log holds %q", held)
 		}
 	}
+	d.everyToolIsNamed(t)
 }
 
 // signedInPerson makes a person of a workspace as their first sign-in does, outside any server.
@@ -459,6 +460,7 @@ func TestDisablingAPersonEndsTheirSessionsAtOnce(t *testing.T) {
 		{"grant", "--disable", "--revoke", "--subject", "00u-dana"}, {"grant", liveAccount, "--disable", "--subject", "00u-dana"}} {
 		d.refusal(t, 2, append(args, "--state-dir", "acme")...)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // In the demo workspace, an account of the demo book can be granted before any command has read it.
