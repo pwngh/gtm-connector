@@ -493,4 +493,150 @@ func TestAMappedThreadIsMatchedToItsDeal(t *testing.T) {
 	if len(shown.Matches) != 1 || shown.Matches[0].ID != listed[0].ID {
 		t.Errorf("the deal's card names %+v", shown.Matches)
 	}
+	first := listed[0]
+
+	// A thread goes on after its parent message. When its deal is closed and the account's next deal is
+	// registered, it fits both, so the connector asks a person: it waits, under a receipt of its own, and
+	// reaches no card until someone decides.
+	d.result(t, &deal, "deal", "close", deal.ID, "--state-dir", "threads")
+	var second dealResult
+	d.result(t, &second, "deal", "new", c.account, "--state-dir", "threads")
+	var waiting []matchResult
+	d.result(t, &waiting, "deal", "matches", "--state-dir", "threads")
+	if len(waiting) != 1 || waiting[0].Item != first.Item || waiting[0].State != "waiting" || waiting[0].Deal != nil ||
+		waiting[0].Basis != "deal_closed" || strings.Join(waiting[0].Candidates, " ") != deal.ID+" "+second.ID ||
+		text(waiting[0].Supersedes) != first.ID || waiting[0].DecidedBy != nil {
+		t.Fatalf("the thread after the account's next deal was registered: %+v", waiting)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE id = $1 AND tool = 'decide_match' AND status = 'ok'
+		AND principal_id IS NULL AND arguments::jsonb = jsonb_build_object('kind', 'thread', 'item', $2::text,
+			'decision', 'waiting', 'deal', NULL, 'match', $3::text)`, waiting[0].Receipt, first.Item, first.ID); n != 1 {
+		t.Errorf("the receipt of the thread's second decision: %s", waiting[0].Receipt)
+	}
+	code, stdout, stderr = d.line(t, "brief", c.account, "--as-of", "2027-01-15", "--state-dir", "threads")
+	if code != 0 || strings.Contains(stdout, "from one selected thread") ||
+		!strings.Contains(stdout, "Slack: not read. The account's thread is not matched to this card.\n") {
+		t.Fatalf("the second deal's card while the thread waits: exit %d\n%s%s", code, stdout, stderr)
+	}
+	// A brief does not ask again, and neither does a second look.
+	d.result(t, &waiting, "deal", "matches", "--state-dir", "threads")
+	if len(waiting) != 1 || text(waiting[0].Supersedes) != first.ID {
+		t.Fatalf("the thread was asked about again: %+v", waiting)
+	}
+	// A person puts it on the open deal, and that deal's card reads it.
+	var decided matchResult
+	d.result(t, &decided, "deal", "decide", waiting[0].ID, "--deal", second.ID, "--state-dir", "threads")
+	if decided.State != "matched" || text(decided.Deal) != second.ID ||
+		strings.Join(decided.Candidates, " ") != deal.ID+" "+second.ID {
+		t.Fatalf("the person's decision: %+v", decided)
+	}
+	code, stdout, stderr = d.line(t, "brief", c.account, "--as-of", "2027-01-15", "--state-dir", "threads")
+	if code != 0 || !strings.Contains(stdout, "from one selected thread") {
+		t.Fatalf("the second deal's card after the decision: exit %d\n%s%s", code, stdout, stderr)
+	}
+
+	// A thread mapped while the next deal is open, whose parent message the closed deal holds, waits from
+	// its first decision.
+	if code, _, stderr := d.line(t, "debug", "slack", "map", "--account", c.account, "--channel", "C0000000009",
+		"--thread-ts", "1600000000.000100", "--replace", "--state-dir", "threads"); code != 0 {
+		t.Fatalf("map an older thread: exit %d\n%s", code, stderr)
+	}
+	d.result(t, &waiting, "deal", "matches", "--state-dir", "threads")
+	if len(waiting) != 1 || waiting[0].Item == first.Item || waiting[0].State != "waiting" ||
+		waiting[0].Basis != "deal_closed" || strings.Join(waiting[0].Candidates, " ") != deal.ID+" "+second.ID ||
+		waiting[0].Supersedes != nil {
+		t.Fatalf("an older thread mapped while the next deal is open: %+v", waiting)
+	}
+	// The database holds another writer to that too. With the connector's wait taken away, a first decision
+	// that puts the thread on the closed deal by its time is refused.
+	workspace, err := d.owner.Workspace(ctx, "threads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := conn(t, d.ownerURL)
+	var kept string
+	if err := owner.QueryRow(ctx, `SELECT to_jsonb(m)::text FROM deal_matches m WHERE id = $1`, waiting[0].ID).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	receipt := decisionReceipt(t, d, workspace.ID, c.account, map[string]any{"kind": "thread", "item": waiting[0].Item,
+		"decision": "matched", "deal": deal.ID})
+	for _, statement := range []string{`SET session_replication_role = replica`,
+		`DELETE FROM deal_matches WHERE id = '` + waiting[0].ID + `'`, `SET session_replication_role = origin`} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = owner.Exec(ctx, `INSERT INTO deal_matches (workspace_id, kind, item, account_ref, at, candidates, state,
+		deal_ref, basis, receipt_id) SELECT workspace_id, kind, item, account_ref, at, ARRAY[$2::text], 'matched', $2,
+		'within_deal', $3 FROM jsonb_populate_record(NULL::deal_matches, $1::jsonb)`, kept, deal.ID, receipt)
+	if err == nil || !strings.Contains(err.Error(), "waits for a person") {
+		t.Errorf("a first decision that puts the thread on the closed deal: %v", err)
+	}
+	for _, statement := range []string{`SET session_replication_role = replica`,
+		`DELETE FROM deal_matches WHERE item = '` + waiting[0].Item + `'`,
+		`INSERT INTO deal_matches SELECT * FROM jsonb_populate_record(NULL::deal_matches, '` + kept + `'::jsonb)`,
+		`SET session_replication_role = origin`} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A person who keeps it on the closed deal is not asked again.
+	d.result(t, &decided, "deal", "decide", waiting[0].ID, "--deal", deal.ID, "--state-dir", "threads")
+	if code, _, stderr := d.line(t, "brief", c.account, "--as-of", "2027-01-15", "--state-dir", "threads"); code != 0 {
+		t.Fatalf("brief: exit %d\n%s", code, stderr)
+	}
+	d.result(t, &waiting, "deal", "matches", "--state-dir", "threads")
+	if len(waiting) != 0 {
+		t.Fatalf("a thread a person kept on the closed deal waits again: %+v", waiting)
+	}
+	if n := d.count(t, `SELECT count(*) FROM gtm_integrity_violations()`); n != 0 {
+		t.Errorf("%d integrity violations", n)
+	}
+}
+
+// A call with no time fits every deal of its account. One the account's only deal took waits for a person
+// once that deal is closed and the next is registered. A call with a time stays on the deal that holds it.
+func TestAnUntimedCallWaitsWhenTheNextDealIsRegistered(t *testing.T) {
+	d := setUpDemo(t)
+	d.connectDemo(t, defaultWorkspace)
+	if code, _, stderr := d.read(t, "connect", "calls", "--seller", "Morgan Reed"); code != 0 {
+		t.Fatalf("connect calls: %s", stderr)
+	}
+	if code, _, stderr := d.line(t, "debug", "calls", "import", callFile(t, "untimed.vtt", "We will sign soon."),
+		"--account", "acc-007"); code != 0 {
+		t.Fatalf("import: %s", stderr)
+	}
+	var deal, second dealResult
+	d.result(t, &deal, "deal", "new", "acc-007")
+	var listed []matchResult
+	d.result(t, &listed, "deal", "matches", "--all")
+	if len(listed) != 1 || listed[0].State != "matched" || listed[0].Basis != "only_deal" || listed[0].At != nil {
+		t.Fatalf("the untimed call on the account's only deal: %+v", listed)
+	}
+	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &second, "deal", "new", "acc-007")
+	var waiting []matchResult
+	d.result(t, &waiting, "deal", "matches")
+	if len(waiting) != 1 || waiting[0].Kind != "call" || waiting[0].Basis != "deal_closed" ||
+		strings.Join(waiting[0].Candidates, " ") != deal.ID+" "+second.ID || text(waiting[0].Supersedes) != listed[0].ID {
+		t.Fatalf("the untimed call after the next deal was registered: %+v", waiting)
+	}
+	// A call with a time is its deal's: it is imported for the closed deal's time and does not wait.
+	if code, _, stderr := d.line(t, "debug", "calls", "import", callFile(t, "timed.vtt", "We signed last year."),
+		"--account", "acc-007", "--called-at", "2020-01-10T15:00:00Z"); code != 0 {
+		t.Fatalf("import: %s", stderr)
+	}
+	d.result(t, &listed, "deal", "matches", "--all")
+	var timed *matchResult
+	for i := range listed {
+		if listed[i].At != nil {
+			timed = &listed[i]
+		}
+	}
+	if timed == nil || timed.State != "matched" || text(timed.Deal) != deal.ID || timed.Basis != "within_deal" {
+		t.Fatalf("the timed call: %+v", listed)
+	}
+	if n := d.count(t, `SELECT count(*) FROM gtm_integrity_violations()`); n != 0 {
+		t.Errorf("%d integrity violations", n)
+	}
 }

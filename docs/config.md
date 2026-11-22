@@ -62,9 +62,16 @@ and the connector matches each to a deal of that account:
   deal.
 - **A call with no time** fits every deal of its account. While the account has had one deal, that
   deal takes it. Once it has had two, the call waits for a person.
+- **A thread goes on.** Its time says only where it starts, so a thread that began under one deal may
+  hold the words of the next. When the deal that holds a thread's time is closed and the account has
+  an open deal, the thread fits both. It waits for a person, with the two deals as its candidates,
+  and reaches no card until someone decides. The same holds for a call with no time that the closed
+  deal took. A person who then keeps it on the closed deal is not asked again for that open deal;
+  the account's next deal asks again. A call with a time stays on the deal that holds it.
 - **When it is decided:** as a deal is registered, as a call is imported or a thread mapped while the
-  account has an open deal, and before `brief` reads the account. Each item is decided once, and a
-  person may decide it again.
+  account has an open deal, and before `brief` reads the account. The connector decides an item once,
+  and a second time only to make it wait between a closed deal and the open one. A person may decide
+  it again.
 - **What a deal's card reads:** the account's current call and thread only when they are matched to
   that deal. Otherwise the card says `Calls: not read. The account's transcript is not matched to this
   card.` or `Slack: not read. The account's thread is not matched to this card.` Every other card,
