@@ -245,6 +245,8 @@ In the browser, a session reads a card, a unit or a receipt only through a grant
 | The deal routes read through the same grants. The deal list holds the deals of the granted accounts only, and a deal of another account answers 403 as an unknown one does. Registering a deal for an account without a grant is refused 403 and leaves one more `get_account` receipt finished as error/403 with no rows, and no `list_opportunities` receipt. After a grant is revoked, the list leaves the account's deals out and a read of one answers 403. | `TestDealRoutesKeepTheGrants` (`cmd/gtm-connector`) |
 | A refresh reads as the signed-in person and publishes a card for the deal: every read the card rests on, and its seal, name them. It needs the CSRF token and the public origin. A person with no grant on the deal's account, an unknown deal and what is no deal ID are each refused 403 under one `get_account` receipt finished as error/403 with no rows, and no card is published for any deal; a closed deal is refused 409. | `TestRefreshPublishesANewCardForTheDeal` (`cmd/gtm-connector`) |
 | A refreshed card is the deal's it was asked for or is not published: a deal that closed before the read, one that closes during it, and one that gives way to the account's next deal during it, each publish nothing. | `TestARefreshedCardIsOnlyTheDealsAskedFor` (`cmd/gtm-connector`) |
+| A deal closes only under a `close_deal` receipt that finished ok for its account and names who closed it, whose arguments are the deal, the basis, the reason and the final card and nothing else, and the final card is a card of the deal and its newest, or the deal has none. The database refuses any other close from any writer, a close in a transaction with a pinned snapshot, and a reason the command would refuse; it stamps the time itself and lets one receipt close one deal. A restore checks the receipt and the final card too. | `TestADealClosesOnlyAsItsReceiptNames`, `TestACloseUnderAPinnedSnapshotIsRefused`, `TestARestoreRefusesACloseItsReceiptDoesNotName`, `TestARestoreRefusesACloseOnACardOfNoDeal` (`storage/postgres`) |
+| `deal close` records the owner's reason and closes on the card it made just before: a deal that got a newer card, or that another close closed, while it ran is left as that left it, under a receipt finished as error/409. Through the store a person needs a live grant on the deal's account, checked again as the close commits, and a grant that ends in between stops the close under a receipt finished as error/403. An unknown deal is refused under a receipt that names no account. No route closes a deal. | `TestCloseDealRecordsWhoWhyAndTheFinalCard`, `TestACloseLosesToWhatChangedTheDeal` (`storage/postgres`), `TestCloseMakesTheFinalCardAndRecordsWhy` (`cmd/gtm-connector`) |
 | The match routes read through the same grants. The queue holds the matches of the granted accounts only. A decision needs the CSRF token and the public origin. A decision that is kept leaves a `decide_match` receipt. A person with no grant on the match's account is refused 403 as for an unknown match, in the same words, and each of those refusals leaves a receipt. A body that is not one of the two documented objects, a deal of another account and a superseded match are refused 400, 400 and 409. A decision sent after the grant was revoked is refused 403. | `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`) |
 | No answer under the API, MCP, discovery or health paths may be kept by a browser or a proxy: not the session, a card, its bytes, a unit or a receipt. | `TestNoAPIResponseIsKept`, `TestNoSignedInResponseIsKept` (`transport/http`) |
 
@@ -318,7 +320,7 @@ show source text as it is stored, for checking a seal or tracing a read.
 | `debug calls inspect --full` | Diagnostic: the original transcript, quoted in text and escaped in JSON | The app role's URL | `TestOnlyFullInspectionShowsTextOutsideTheExcerpt` (`storage/postgres`), `TestFormatCharactersAreEscapedInJSON` (`cmd/gtm-connector`) |
 | `list_deals` | Each deal's record, with its account name neutralized and its newest card's ID and time. No card. Marked `untrusted_data: true`. | A token with `crm:read` and a grant on the deal's account, within the selection when one is served | `TestMountedDealCard` (`transport/mcp`), for the records it lists |
 | `read_deal_card` | The deal's record and its newest card: the text and the units as `inspect` shows them, which is as sealed for a card of today's rules and rendered again for a card that holds a unit sealed under older ones, and the lines and gaps as saved. Marked `untrusted_data: true`. | A token with `crm:read` and the scopes of every source the card read, a grant on the deal's account, and with a selection the account, and its Slack when the card read Slack | `TestMountedDealCard`, `TestMountedDealCardRefusals` (`transport/mcp`), for the sealed text of a card of today's rules, its seal's digest and receipt, and the record references |
-| `GET /v1/deals`, `GET /v1/deals/{id}`, `GET /v1/matches` with or without `all=1`, and the answers of `POST /v1/deals` and `POST /v1/matches/{id}` | Each deal's and match's account name neutralized, and for one deal its newest card as `GET /api/v1/cards/{card}` gives it, with the matches that card read. No source scope or selection applies in the browser. | A session with a grant on the account | `TestDealRoutesKeepTheGrants`, `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`), for who can reach them. No test requests `all=1`. |
+| `GET /v1/deals`, `GET /v1/deals/{id}`, `GET /v1/matches` with or without `all=1`, and the answers of `POST /v1/deals` and `POST /v1/matches/{id}` | Each deal's and match's account name neutralized, a closed deal's reason neutralized, and for one deal its newest card as `GET /api/v1/cards/{card}` gives it, with the matches that card read. No source scope or selection applies in the browser. | A session with a grant on the account | `TestDealRoutesKeepTheGrants`, `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`), for who can reach them, and `TestAClosedDealShowsItsCloseThroughTheRoutes` for the reason. No test requests `all=1`. |
 | The `reporting` views | Export: what a sealed card already prints of a source, as a line's text, label and contact, and each receipt's record references. No unit's body, no card's bytes, no call's arguments. | A login role granted the database's reporting role | `TestTheReportingRoleReadsOnlyTheViews` (`storage/postgres`) |
 | The five direct MCP reads | Data for the client: each record as its source adapter returned it, marked `untrusted_data: true` (see the [limits](#known-limits)) | A token with the tool's scope and a grant on the account | `TestMountedDirectReadsReturnTheRecordsAsTheSourceGaveThem` (`transport/mcp`), `TestOneRequestAndTheMessagesAsGiven` (`sources/slack`) |
 | A backup | Export: every row and the credential files `setup` makes | Whoever can read the file | `TestABackupRestoresEveryRow` (`storage/postgres`), `TestBackupAndRestoreKeepState` (`cmd/gtm-connector`) |
@@ -387,6 +389,10 @@ its SHA-256.**
 
 ## Claims no test checks yet
 
+- `deal close` leaves a deal open when a read for its final card fails. The command returns the read's
+  error before it closes; the test refuses a planning date that is none, and no test makes a read fail.
+- `deal close` exits 3 and names the card it made when a newer card overtakes it. The store's refusal is
+  tested; no test races the command itself.
 - A grant revoked while a refresh reads ends it with 403 and no card. The maker reads the grant again
   before each read and as it publishes; no test revokes one during a refresh.
 - A refresh maps a failed read to 502 and evidence that fails a check to 422. The route test shows the
@@ -428,6 +434,17 @@ its SHA-256.**
   against the stored rows, follows their links, and compares the views before and after a restore.
 
 ## Known limits
+
+- **A deal closed before closes were recorded has no receipt to check.** It is marked `unrecorded`, and
+  the database closes no deal that way again. A restore loads rows with the triggers off, and its check
+  accepts an `unrecorded` close as it stands, so a dump edited to mark an open deal closed that way
+  restores. Such a deal gets no new card. Its cards and receipts are checked as any other's.
+
+- **A reason is a person's free text.** The deal row and the `close_deal` receipt's arguments hold it
+  as typed, with the space around it cut. The deal routes, `deal show` and `inspect RECEIPT_ID`
+  neutralize it before they show it. The receipt route of the API and `audit --json` give a receipt's
+  arguments as stored, as they do for any call. No MCP tool gives it: the deal record of `list_deals`
+  and `read_deal_card` holds no reason.
 
 - **Nothing limits how often a person refreshes a deal.** Each refresh reads the deal's sources and
   publishes a card, as the person, for an account they hold a grant on. A person, or a page running in

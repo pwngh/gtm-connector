@@ -64,6 +64,8 @@ type run struct {
 	action string
 	// admitted is the operator's word a card or receipt inspect shows was admitted on, or nil for one made here.
 	admitted *postgres.OperatorWord
+	// closed is how many closed deals deal list left out.
+	closed int
 }
 
 // folder is the --state-dir that names this workspace in the commands printed for it.
@@ -217,7 +219,7 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 			"it was read; nothing was published. Run the command again."}
 	case errors.Is(err, postgres.ErrDealOpen):
 		return &failure{code: 3, next: "gtm-connector deal list" + r.here(), message: "This account already has " +
-			"an open deal. An account has one open deal at a time; close it first with gtm-connector deal close ID."}
+			"an open deal. An account has one open deal at a time; close it first with gtm-connector deal close ID --reason REASON."}
 	}
 	return &failure{code: 1, message: plain(err)}
 }

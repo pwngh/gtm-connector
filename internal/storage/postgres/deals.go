@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base32"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -34,10 +38,39 @@ type Deal struct {
 	AccountReadID, OpportunitiesReadID string
 	RegisteredAt                       time.Time
 	ClosedAt                           *time.Time
+	// Close is how the deal closed, or nil while it is open.
+	Close *DealClosed
 	// LatestCard is the newest card published for the deal, or nil.
 	LatestCard *DealCard
 	// Read are the matches of the calls and threads the newest card read. Deal and ViewDeal fill it.
 	Read []Match
+}
+
+// DealClosed is the record of a deal's close.
+type DealClosed struct {
+	// Basis is person, or unrecorded for a deal closed before closes were recorded, which has nothing else.
+	Basis string
+	// Reason is the person's reason: their own words, neutralized before they are shown.
+	Reason string
+	// By is the principal that closed the deal, or "" for the owner.
+	By string
+	// ReceiptID is the close_deal receipt.
+	ReceiptID string
+	// FinalCard is the deal's newest card as it closed, or "" for a deal that had none.
+	FinalCard string
+}
+
+// DealClose is what CloseDeal records.
+type DealClose struct {
+	WorkspaceID, Ref string
+	// PrincipalID is the person that closes the deal, who must hold a live grant on its account, or "" for
+	// the owner.
+	PrincipalID string
+	// Reason is one line of 1 to 500 characters with no control character.
+	Reason string
+	// Card is the card this close made as the deal's final card, or "" for a close that made none. With it,
+	// the close is this close's or is refused: the deal must still be open, with that card its newest.
+	Card string
 }
 
 // DealCard names one card of a deal.
@@ -66,7 +99,12 @@ var (
 	ErrDealOpen = errors.New("the account already has an open deal")
 	// ErrDealBindings refuses a deal that binds what its reads did not return.
 	ErrDealBindings = errors.New("the deal binds records its reads did not return")
+	// ErrCloseReason refuses a close whose reason is not one line of 1 to 500 characters.
+	ErrCloseReason = errors.New("a reason is one line of 1 to 500 characters")
 )
+
+// dealRef is the form of a deal's ID, as the deals table checks it.
+var dealRef = regexp.MustCompile(`^[a-z0-9]{1,40}-[0-9]{4}-([a-z2-7]{6}|[a-z2-7]{12})(-[1-9][0-9]{0,5})?$`)
 
 // dealRefWord is the form of the word a deal's ID starts with.
 func dealRefWord(word string) bool {
@@ -91,6 +129,8 @@ func dealKey(account string, n int) string {
 const dealColumns = `d.workspace_id, d.ref, d.account_ref, a.display_name, coalesce(d.opportunity_ref, ''),
 	coalesce(d.contract_ref, ''), coalesce(to_char(d.renews_on, 'YYYY-MM-DD'), ''), d.state,
 	coalesce(d.registered_by::text, ''), d.account_read_id, d.opportunities_read_id, d.registered_at, d.closed_at,
+	coalesce(d.close_basis, ''), coalesce(d.close_reason, ''), coalesce(d.closed_by::text, ''),
+	coalesce(d.close_receipt_id::text, ''), coalesce(d.final_card_id::text, ''),
 	l.id, l.brief_id, l.published_at`
 
 // dealFrom joins a deal to its account's name and to its newest card.
@@ -106,11 +146,16 @@ func scanDeal(row pgx.Row) (Deal, error) {
 	var d Deal
 	var cardID, briefID *string
 	var published *time.Time
+	var closed DealClosed
 	err := row.Scan(&d.WorkspaceID, &d.Ref, &d.AccountRef, &d.AccountName, &d.OpportunityRef, &d.ContractRef,
 		&d.RenewsOn, &d.State, &d.RegisteredBy, &d.AccountReadID, &d.OpportunitiesReadID, &d.RegisteredAt,
-		&d.ClosedAt, &cardID, &briefID, &published)
+		&d.ClosedAt, &closed.Basis, &closed.Reason, &closed.By, &closed.ReceiptID, &closed.FinalCard,
+		&cardID, &briefID, &published)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Deal{}, ErrNotFound
+	}
+	if closed.Basis != "" {
+		d.Close = &closed
 	}
 	if cardID != nil {
 		d.LatestCard = &DealCard{ID: *cardID, BriefID: deref(briefID), PublishedAt: *published}
@@ -254,18 +299,152 @@ func (s *Store) OpenDeal(ctx context.Context, workspaceID, accountRef string) (D
 	return d, err == nil, err
 }
 
-// CloseDeal closes an open deal and gives it, with changed true. A closed deal is given as it is.
-func (s *Store) CloseDeal(ctx context.Context, workspaceID, ref string) (d Deal, changed bool, err error) {
-	if !validUUID(workspaceID) {
-		return Deal{}, false, ErrNotFound
+// CloseReason is a reason as a close records it: trimmed, one line of 1 to 500 characters with no control
+// character, or ErrCloseReason.
+func CloseReason(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > 500 {
+		return "", ErrCloseReason
 	}
-	tag, err := s.pool.Exec(ctx, `UPDATE deals SET state = 'closed', closed_at = clock_timestamp()
-		WHERE workspace_id = $1 AND ref = $2 AND state = 'open'`, workspaceID, ref)
+	for _, c := range text {
+		if unicode.IsControl(c) || c == '\u2028' || c == '\u2029' {
+			return "", ErrCloseReason
+		}
+	}
+	return text, nil
+}
+
+// startClose commits the pending close_deal receipt of one close, naming the deal, the reason and the final
+// card. account is "" for a close that is refused before the deal is known to the caller.
+func (s *Store) startClose(ctx context.Context, in DealClose, account, finalCard string) (Receipt, error) {
+	encoded, err := json.Marshal(map[string]any{"deal": in.Ref, "basis": "person", "reason": in.Reason,
+		"final_card": nullable(finalCard)})
+	if err != nil {
+		return Receipt{}, err
+	}
+	run := newDecisionRun()
+	id := "close-" + strings.TrimPrefix(run.id, "match-")
+	return s.StartReceipt(ctx, ReceiptStart{WorkspaceID: in.WorkspaceID, OperationID: id + "/1",
+		PrincipalID: in.PrincipalID, TokenID: run.token, Tool: "close_deal", AccountRef: account, Arguments: encoded,
+		RequestID: json.RawMessage("1"), BriefID: id, Lease: time.Minute})
+}
+
+// CloseDeal closes an open deal for a person or the owner, with their reason, and gives it with changed
+// true. The close gets a close_deal receipt, committed before the deal changes and finished ok in the
+// transaction that closes it, which names the deal's final card: its newest card as it closes, or none. A
+// deal that is closed already is given as it is, with no receipt, unless the close names the card it made
+// (Card): then the close is its own or is refused, and a deal that is closed already, or whose newest card is
+// another, gives ErrDealChanged under a receipt finished as an error. A person needs a live grant on the deal's
+// account, checked again as the close commits: an unknown deal, or one of an account they hold no grant on,
+// gets ErrNotPermitted under a receipt refused as error/403 that names no account, and ErrNotFound for the
+// owner. A deal that got a newer card, or closed, while this close ran gives ErrDealChanged under a receipt
+// finished as an error, and the deal is as that left it.
+func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bool, err error) {
+	if !validUUID(in.WorkspaceID) || in.PrincipalID != "" && !validUUID(in.PrincipalID) {
+		return Deal{}, false, ErrNotPermitted
+	}
+	if in.Reason, err = CloseReason(in.Reason); err != nil {
+		return Deal{}, false, err
+	}
+	if in.Card != "" && !validUUID(in.Card) {
+		return Deal{}, false, ErrDealChanged
+	}
+	before, err := s.Deal(ctx, in.WorkspaceID, in.Ref)
+	allowed := err == nil
+	switch {
+	case errors.Is(err, ErrNotFound):
+	case err != nil:
+		return Deal{}, false, err
+	case in.PrincipalID != "":
+		if allowed, err = s.HasAccountGrant(ctx, in.WorkspaceID, in.PrincipalID, before.AccountRef); err != nil {
+			return Deal{}, false, err
+		}
+	}
+	if !allowed {
+		if !dealRef.MatchString(in.Ref) {
+			in.Ref = "<invalid>"
+		}
+		refused, err := s.startClose(ctx, in, "", "")
+		if err != nil {
+			return Deal{}, false, err
+		}
+		if err := s.failDecision(ctx, refused, 403, "not_permitted"); err != nil {
+			return Deal{}, false, err
+		}
+		if in.PrincipalID == "" {
+			return Deal{}, false, ErrNotFound
+		}
+		return Deal{}, false, ErrNotPermitted
+	}
+	if before.State != "open" && in.Card == "" {
+		return before, false, nil
+	}
+	final := in.Card
+	if final == "" && before.LatestCard != nil {
+		final = before.LatestCard.ID
+	}
+	receipt, err := s.startClose(ctx, in, before.AccountRef, final)
 	if err != nil {
 		return Deal{}, false, err
 	}
-	d, err = s.Deal(ctx, workspaceID, ref)
-	return d, tag.RowsAffected() == 1, err
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.at("close:started"); err != nil {
+			return err
+		}
+		if in.PrincipalID != "" {
+			var live bool
+			err := tx.QueryRow(ctx, `
+				SELECT true FROM account_grants g
+				  JOIN principals p ON p.workspace_id = g.workspace_id AND p.id = g.principal_id
+				 WHERE g.workspace_id = $1 AND g.principal_id = $2 AND g.account_ref = $3
+				   AND g.revoked_at IS NULL AND p.disabled_at IS NULL
+				   FOR SHARE OF g, p`, in.WorkspaceID, in.PrincipalID, before.AccountRef).Scan(&live)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotPermitted
+			}
+			if err != nil {
+				return err
+			}
+		}
+		// The update lock waits for every card being bound to the deal, and holds off any other.
+		var state string
+		if err := tx.QueryRow(ctx, `SELECT state FROM deals WHERE workspace_id = $1 AND ref = $2 FOR UPDATE`,
+			in.WorkspaceID, in.Ref).Scan(&state); err != nil {
+			return err
+		}
+		var newest string
+		err := tx.QueryRow(ctx, `SELECT c.id::text FROM deal_cards dc
+			  JOIN cards c ON c.workspace_id = dc.workspace_id AND c.id = dc.card_id
+			 WHERE dc.workspace_id = $1 AND dc.deal_ref = $2
+			 ORDER BY c.published_at DESC, c.id DESC LIMIT 1`, in.WorkspaceID, in.Ref).Scan(&newest)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if state != "open" || newest != final {
+			return ErrDealChanged
+		}
+		if _, err := finishLocked(ctx, tx, ReceiptFinish{ReceiptID: receipt.ID, LeaseToken: receipt.LeaseToken,
+			Status: "ok", HTTPStatus: 200}, false); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE deals SET state = 'closed', closed_at = clock_timestamp(),
+			close_basis = 'person', close_reason = $3, closed_by = $4, close_receipt_id = $5, final_card_id = $6
+			WHERE workspace_id = $1 AND ref = $2`, in.WorkspaceID, in.Ref, in.Reason, nullable(in.PrincipalID),
+			receipt.ID, nullable(final))
+		return err
+	})
+	if err != nil {
+		status, code := 500, "request_failed"
+		switch {
+		case errors.Is(err, ErrNotPermitted):
+			status, code = 403, "not_permitted"
+		case errors.Is(err, ErrDealChanged):
+			status, code = 409, "deal_changed"
+		}
+		return Deal{}, false, errors.Join(err, s.failDecision(ctx, receipt, status, code))
+	}
+	d, err = s.Deal(ctx, in.WorkspaceID, in.Ref)
+	return d, true, err
 }
 
 // bindOpenDeal binds a card being published to its account's open deal, inside the publication's

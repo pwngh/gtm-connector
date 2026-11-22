@@ -719,7 +719,7 @@ func TestABriefPreparedThroughMCPBelongsToItsDeal(t *testing.T) {
 		t.Fatalf("deal show after brief: %+v", shown)
 	}
 	// The account's next deal does not hold the call's time, so its brief does not read the call.
-	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	var second dealResult
 	d.result(t, &second, "deal", "new", "acc-007")
 	brief = prepare()

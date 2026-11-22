@@ -137,7 +137,7 @@ func TestCallsAreMatchedToTheirDeal(t *testing.T) {
 	}
 
 	// The account's next deal: the call belongs to the first, so the second's card does not read it.
-	d.result(t, &deal, with("deal", "close", deal.ID)...)
+	d.result(t, &deal, with("deal", "close", deal.ID, "--reason", "Renewed", "--no-card")...)
 	var second dealResult
 	d.result(t, &second, with("deal", "new", "acc-007")...)
 	if second.ID != deal.ID+"-2" {
@@ -205,7 +205,7 @@ func TestMatchRoutesKeepTheGrants(t *testing.T) {
 	importCall(callFile(t, "first.vtt", "We will sign the renewal this quarter."), "--called-at", "2020-01-10T15:00:00Z")
 	var first, second dealResult
 	d.result(t, &first, "deal", "new", "acc-007")
-	d.result(t, &first, "deal", "close", first.ID)
+	d.result(t, &first, "deal", "close", first.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-007")
 	importCall(callFile(t, "untimed.vtt", "We will sign the renewal soon."))
 
@@ -499,7 +499,7 @@ func TestAMappedThreadIsMatchedToItsDeal(t *testing.T) {
 	// A thread goes on after its parent message. When its deal is closed and the account's next deal is
 	// registered, it fits both, so the connector asks a person: it waits, under a receipt of its own, and
 	// reaches no card until someone decides.
-	d.result(t, &deal, "deal", "close", deal.ID, "--state-dir", "threads")
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card", "--state-dir", "threads")
 	var second dealResult
 	d.result(t, &second, "deal", "new", c.account, "--state-dir", "threads")
 	var waiting []matchResult
@@ -615,7 +615,7 @@ func TestAnUntimedCallWaitsWhenTheNextDealIsRegistered(t *testing.T) {
 	if len(listed) != 1 || listed[0].State != "matched" || listed[0].Basis != "only_deal" || listed[0].At != nil {
 		t.Fatalf("the untimed call on the account's only deal: %+v", listed)
 	}
-	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-007")
 	var waiting []matchResult
 	d.result(t, &waiting, "deal", "matches")

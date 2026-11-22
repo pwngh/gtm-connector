@@ -38,7 +38,7 @@ func TestARejectedCallReachesNoCard(t *testing.T) {
 	d.result(t, &listed, "deal", "matches", "--all")
 	var rejected matchResult
 	d.result(t, &rejected, "deal", "decide", listed[0].ID, "--reject")
-	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	code, stdout, stderr := d.read(t, "brief", "acc-007")
 	if code != 0 || strings.Contains(stdout, "We will sign soon.") ||
 		!strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
@@ -153,7 +153,7 @@ func TestStaleAndSupersededMatchesAreMarked(t *testing.T) {
 	d.result(t, &listed, "deal", "matches", "--all")
 	read := listed[0]
 	var second dealResult
-	d.result(t, &first, "deal", "close", first.ID)
+	d.result(t, &first, "deal", "close", first.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-007")
 	if code, _, stderr := d.line(t, "debug", "calls", "import", callFile(t, "untimed.vtt", "We will sign one day."),
 		"--account", "acc-007"); code != 0 {
@@ -236,7 +236,7 @@ func TestRestoreChecksAWaitBetweenTwoDeals(t *testing.T) {
 	}
 	var deal, second dealResult
 	d.result(t, &deal, "deal", "new", "acc-007")
-	d.result(t, &deal, "deal", "close", deal.ID)
+	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-007")
 	owner := conn(t, d.ownerURL)
 	violations := func() []string {
@@ -339,7 +339,7 @@ func TestTheDatabaseHoldsEveryWriterToTheWait(t *testing.T) {
 	}
 	var first, second, third, fourth dealResult
 	d.result(t, &first, "deal", "new", "acc-007")
-	d.result(t, &first, "deal", "close", first.ID)
+	d.result(t, &first, "deal", "close", first.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &second, "deal", "new", "acc-007")
 	var waiting []matchResult
 	d.result(t, &waiting, "deal", "matches")
@@ -365,7 +365,7 @@ func TestTheDatabaseHoldsEveryWriterToTheWait(t *testing.T) {
 		t.Errorf("a wait over a person's choice of the closed deal: %v", err)
 	}
 	// The account's next deal is another question: the connector asks, and names the choice it supersedes.
-	d.result(t, &second, "deal", "close", second.ID)
+	d.result(t, &second, "deal", "close", second.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &third, "deal", "new", "acc-007")
 	d.result(t, &waiting, "deal", "matches")
 	if len(waiting) != 1 || strings.Join(waiting[0].Candidates, " ") != first.ID+" "+third.ID ||
@@ -373,7 +373,7 @@ func TestTheDatabaseHoldsEveryWriterToTheWait(t *testing.T) {
 		t.Fatalf("the wait for the third deal: %+v", waiting)
 	}
 	d.result(t, &kept, "deal", "decide", waiting[0].ID, "--deal", first.ID)
-	d.result(t, &third, "deal", "close", third.ID)
+	d.result(t, &third, "deal", "close", third.ID, "--reason", "Renewed", "--no-card")
 	d.result(t, &fourth, "deal", "new", "acc-007")
 	d.result(t, &waiting, "deal", "matches")
 	if len(waiting) != 1 || text(waiting[0].Supersedes) != kept.ID {
@@ -398,7 +398,7 @@ func TestTheDatabaseHoldsEveryWriterToTheWait(t *testing.T) {
 		kept.ID); n != 1 {
 		t.Error("a wait kept the time its writer gave it")
 	}
-	d.result(t, &fourth, "deal", "close", fourth.ID)
+	d.result(t, &fourth, "deal", "close", fourth.ID, "--reason", "Renewed", "--no-card")
 	if n := d.count(t, `SELECT count(*) FROM gtm_integrity_violations()`); n != 0 {
 		t.Errorf("%d integrity violations after the open deal closed", n)
 	}
