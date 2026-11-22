@@ -272,19 +272,23 @@ func (s *Store) CloseDeal(ctx context.Context, workspaceID, ref string) (d Deal,
 // transaction, when the account has one that was registered by the time the card was, with the matches of
 // the calls and threads it read. The share lock holds a close off until the publication commits. A card whose
 // calls and threads were read for another deal, or with no deal, is refused with ErrDealChanged, and so is one
-// whose match was decided again since it was read.
+// whose match was decided again since it was read, and one required to be a deal's whose account's open deal
+// is no longer that deal.
 func bindOpenDeal(ctx context.Context, tx pgx.Tx, card Card, read *CardDeal) error {
 	var ref string
 	err := tx.QueryRow(ctx, `SELECT ref FROM deals
 		WHERE workspace_id = $1 AND account_ref = $2 AND state = 'open' AND registered_at <= $3 FOR SHARE`,
 		card.WorkspaceID, card.AccountRef, card.PublishedAt).Scan(&ref)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if read.Required {
+			return ErrDealChanged
+		}
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	if read.Ref != "" && read.Ref != ref || read.Ref == "" && read.Unmatched > 0 {
+	if read.Ref != "" && read.Ref != ref || read.Ref == "" && (read.Unmatched > 0 || read.Required) {
 		return ErrDealChanged
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,

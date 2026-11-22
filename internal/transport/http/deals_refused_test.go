@@ -20,6 +20,8 @@ func (r *refusing) RegisterDeal(context.Context, authz.Principal, string) (postg
 	return postgres.Deal{}, r.err
 }
 
+func (r *refusing) RefreshDeal(context.Context, authz.Principal, string) error { return r.err }
+
 // A deal that is not registered answers the status and code the guide gives for its reason: the CRM
 // connected again while it was read is 409 source_changed.
 func TestARefusedDealAnswersItsDocumentedCode(t *testing.T) {
@@ -46,6 +48,27 @@ func TestARefusedDealAnswersItsDocumentedCode(t *testing.T) {
 		r := b.write(http.MethodPost, "/v1/deals", map[string]string{"account": postgrestest.Account})
 		if r.status != c.status || r.code() != c.code {
 			t.Errorf("%v: %d %s, want %d %s", c.err, r.status, r.raw, c.status, c.code)
+		}
+	}
+	// A refresh that publishes no card answers its reason too.
+	for _, c := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{receipts.ErrSourceChanged, http.StatusConflict, "source_changed"},
+		{postgres.ErrDealChanged, http.StatusConflict, "deal_changed"},
+		{httptransport.ErrDealClosed, http.StatusConflict, "deal_closed"},
+		{httptransport.ErrNoCRM, http.StatusConflict, "crm_not_connected"},
+		{httptransport.ErrSourceFailed, http.StatusBadGateway, "source_failed"},
+		{httptransport.ErrNoCard, http.StatusUnprocessableEntity, "evidence_refused"},
+		{authz.ErrNotPermitted, http.StatusForbidden, "not_permitted"},
+		{errors.New("anything else"), http.StatusInternalServerError, "internal"},
+	} {
+		registry.err = c.err
+		r := b.write(http.MethodPost, "/v1/deals/any-2027-aaaaaa/refresh", nil)
+		if r.status != c.status || r.code() != c.code {
+			t.Errorf("refresh, %v: %d %s, want %d %s", c.err, r.status, r.raw, c.status, c.code)
 		}
 	}
 }

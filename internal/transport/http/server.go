@@ -191,6 +191,7 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /v1/deals", read: s.signedIn(s.deals)},
 		{pattern: "POST /v1/deals", write: s.registerDeal},
 		{pattern: "GET /v1/deals/{deal}", read: s.signedIn(s.deal)},
+		{pattern: "POST /v1/deals/{deal}/refresh", write: s.refreshDeal},
 		{pattern: "GET /v1/matches", read: s.signedIn(s.matches)},
 		{pattern: "POST /v1/matches/{match}", write: s.decideMatch},
 	}

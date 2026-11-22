@@ -243,6 +243,8 @@ In the browser, a session reads a card, a unit or a receipt only through a grant
 | --- | --- |
 | Every evidence read needs a live session and a grant. A grant on one account opens no other, a revoked grant reads nothing, and an ID that does not exist is refused like one not granted. | `TestEvidenceReadsNeedAGrant`, `TestAGrantOnOneAccountOpensNoOtherOverHTTP` (`transport/http`), `TestGrantsGuardEveryUnitAndReceiptRead` (`authz`), `TestRefusalsAreUniform` (`storage/postgres`) |
 | The deal routes read through the same grants. The deal list holds the deals of the granted accounts only, and a deal of another account answers 403 as an unknown one does. Registering a deal for an account without a grant is refused 403 and leaves one more `get_account` receipt finished as error/403 with no rows, and no `list_opportunities` receipt. After a grant is revoked, the list leaves the account's deals out and a read of one answers 403. | `TestDealRoutesKeepTheGrants` (`cmd/gtm-connector`) |
+| A refresh reads as the signed-in person and publishes a card for the deal: every read the card rests on, and its seal, name them. It needs the CSRF token and the public origin. A person with no grant on the deal's account, an unknown deal and what is no deal ID are each refused 403 under one `get_account` receipt finished as error/403 with no rows, and no card is published for any deal; a closed deal is refused 409. | `TestRefreshPublishesANewCardForTheDeal` (`cmd/gtm-connector`) |
+| A refreshed card is the deal's it was asked for or is not published: a deal that closed before the read, one that closes during it, and one that gives way to the account's next deal during it, each publish nothing. | `TestARefreshedCardIsOnlyTheDealsAskedFor` (`cmd/gtm-connector`) |
 | The match routes read through the same grants. The queue holds the matches of the granted accounts only. A decision needs the CSRF token and the public origin. A decision that is kept leaves a `decide_match` receipt. A person with no grant on the match's account is refused 403 as for an unknown match, in the same words, and each of those refusals leaves a receipt. A body that is not one of the two documented objects, a deal of another account and a superseded match are refused 400, 400 and 409. A decision sent after the grant was revoked is refused 403. | `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`) |
 | No answer under the API, MCP, discovery or health paths may be kept by a browser or a proxy: not the session, a card, its bytes, a unit or a receipt. | `TestNoAPIResponseIsKept`, `TestNoSignedInResponseIsKept` (`transport/http`) |
 
@@ -385,6 +387,11 @@ its SHA-256.**
 
 ## Claims no test checks yet
 
+- A grant revoked while a refresh reads ends it with 403 and no card. The maker reads the grant again
+  before each read and as it publishes; no test revokes one during a refresh.
+- A refresh maps a failed read to 502 and evidence that fails a check to 422. The route test shows the
+  mapping from the registry's errors, not a source that fails.
+
 - `serve` finishes interrupted receipts every 30 seconds after its sweep at start. The interval is a
   fixed ticker that no test waits for.
 - A receipt's lease lasts five minutes. The tests shorten it.
@@ -421,6 +428,10 @@ its SHA-256.**
   against the stored rows, follows their links, and compares the views before and after a restore.
 
 ## Known limits
+
+- **Nothing limits how often a person refreshes a deal.** Each refresh reads the deal's sources and
+  publishes a card, as the person, for an account they hold a grant on. A person, or a page running in
+  their session, can make the connector send as many reads to the CRM and Slack as it sends requests.
 
 - **The owner can rewrite the evidence.** Whoever holds the owner role, or a superuser of the
   database, can switch the triggers off and change receipts and cards together. Records here are

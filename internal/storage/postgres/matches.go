@@ -586,4 +586,7 @@ type CardDeal struct {
 	Matches []string
 	// Unmatched counts the calls and threads the card read while the account had no open deal.
 	Unmatched int
+	// Required is whether the card is published only as Ref's: with it, a card whose account has no open
+	// deal when it is published, or another one, is refused with ErrDealChanged.
+	Required bool
 }

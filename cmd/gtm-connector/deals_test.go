@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -620,5 +623,202 @@ func TestADealOpenedDuringBriefGetsItsCard(t *testing.T) {
 	d.result(t, &made, "deal", "show", "thornfield-2027-2e3hke")
 	if made.Card == nil || !strings.Contains(stdout, "Brief: "+made.Card.BriefID+"\n") {
 		t.Errorf("the deal's card: %+v", made.Card)
+	}
+}
+
+// POST /v1/deals/{id}/refresh reads every source of an open deal again as the signed-in person and publishes
+// a new card for the deal: each read and the seal name the person, the answer is the deal as GET gives it
+// with the new card, and the card before it stays. A person with no live grant on the deal's account, an
+// unknown deal and a write without the CSRF token are refused and publish nothing, and a closed deal is not
+// refreshed.
+func TestRefreshPublishesANewCardForTheDeal(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("outsider-password-0123456789-abcdef"))
+	outsider, err := d.owner.EnsureDemoPrincipal(ctx, d.workspace, "demo-outsider", "Demo outsider", digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, outsider.ID, "acc-001"); err != nil {
+		t.Fatal(err)
+	}
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-003")
+	b := signInToDemo(t, app)
+	refresh := func(who *signedIn, id string, header map[string]string) (*http.Response, []byte) {
+		sent := map[string]string{"Origin": who.origin, "X-CSRF-Token": who.csrf}
+		for name, value := range header {
+			sent[name] = value
+		}
+		reply := who.send(http.MethodPost, "/v1/deals/"+id+"/refresh", nil, sent)
+		body, _ := io.ReadAll(reply.Body)
+		reply.Body.Close()
+		return reply, body
+	}
+	cards := func() int { return d.count(t, `SELECT count(*) FROM deal_cards WHERE deal_ref = $1`, deal.ID) }
+	type refreshed struct {
+		Deal dealResult
+		Card *struct {
+			ID    string
+			Units []json.RawMessage
+		}
+	}
+	// The deal has no card yet: the refresh makes its first.
+	reply, body := refresh(b, deal.ID, nil)
+	var first refreshed
+	if err := json.Unmarshal(body, &first); reply.StatusCode != http.StatusOK || err != nil || first.Card == nil ||
+		first.Deal.LatestCard == nil || first.Card.ID != first.Deal.LatestCard.ID || len(first.Card.Units) == 0 ||
+		reply.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("the first refresh: %d %s", reply.StatusCode, body)
+	}
+	// Every read the card rests on names the person who asked, and so does its seal.
+	if n := d.count(t, `SELECT count(*) FILTER (WHERE r.principal_id = $2 AND r.status = 'ok') * 1000 + count(*)
+		FROM card_reads cr JOIN cards c ON c.id = cr.card_id JOIN receipts r ON r.id = cr.receipt_id
+		WHERE c.id = $1`, first.Card.ID, principal.ID); n < 3003 || n/1000 != n%1000 {
+		t.Errorf("the reads of the refreshed card that name the person, and all of them: %d", n)
+	}
+	if n := d.count(t, `SELECT count(*) FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
+		WHERE c.id = $1 AND r.tool = 'save_brief' AND r.status = 'ok' AND r.principal_id = $2`, first.Card.ID,
+		principal.ID); n != 1 {
+		t.Errorf("the seal of the refreshed card names the person: %d", n)
+	}
+	// A second refresh publishes another card, and the first stays the deal's.
+	reply, body = refresh(b, deal.ID, nil)
+	var second refreshed
+	if err := json.Unmarshal(body, &second); reply.StatusCode != http.StatusOK || err != nil || second.Card == nil ||
+		second.Card.ID == first.Card.ID || cards() != 2 {
+		t.Fatalf("the second refresh: %d, %d cards\n%s", reply.StatusCode, cards(), body)
+	}
+	// Refusals publish nothing, for this deal or any other.
+	every := func() int { return d.count(t, `SELECT count(*) FROM cards`) }
+	before := every()
+	o := signInAs(t, app, "demo-outsider", "outsider-password-0123456789-abcdef")
+	for name, c := range map[string]struct {
+		who    *signedIn
+		id     string
+		header map[string]string
+		status int
+		code   string
+	}{
+		"no grant on the deal's account": {o, deal.ID, nil, http.StatusForbidden, "not_permitted"},
+		"an unknown deal":                {o, "nothing-2027-aaaaaa", nil, http.StatusForbidden, "not_permitted"},
+		"what is no deal ID":             {o, "not%20an%20id", nil, http.StatusForbidden, "not_permitted"},
+		"an ID that holds a NUL":         {o, "nothing%00", nil, http.StatusForbidden, "not_permitted"},
+		"no CSRF token":                  {b, deal.ID, map[string]string{"X-CSRF-Token": "stale"}, http.StatusForbidden, "csrf_invalid"},
+		"another origin":                 {b, deal.ID, map[string]string{"Origin": "https://elsewhere.example"}, http.StatusForbidden, ""},
+	} {
+		reply, body := refresh(c.who, c.id, c.header)
+		var refused struct{ Error struct{ Code string } }
+		json.Unmarshal(body, &refused)
+		if reply.StatusCode != c.status || c.code != "" && refused.Error.Code != c.code || every() != before {
+			t.Errorf("%s: %d %s, %d cards, %d before", name, reply.StatusCode, body, every(), before)
+		}
+	}
+	// A deal the person holds no grant on and one that does not exist are refused alike, each under one
+	// get_account receipt that names the person, finished as error/403 with no rows. Only the first names an
+	// account, and what is no deal ID is not kept as it was sent.
+	for arguments, account := range map[string]string{
+		`{"deal": "` + deal.ID + `"}`:     "acc-003",
+		`{"deal": "nothing-2027-aaaaaa"}`: "",
+		`{"deal": "<invalid>"}`:           "",
+	} {
+		want := 1
+		if arguments == `{"deal": "<invalid>"}` {
+			want = 2
+		}
+		if n := d.count(t, `SELECT count(*) FROM receipts WHERE principal_id = $1 AND tool = 'get_account'
+			AND status = 'error' AND http_status = 403 AND row_count = 0 AND connection_id IS NULL
+			AND arguments::jsonb = $2::jsonb AND coalesce(requested_account, '') = $3`, outsider.ID, arguments, account); n != want {
+			t.Errorf("%d receipts of the outsider's refused refresh of %s", n, arguments)
+		}
+	}
+	// A closed deal is not refreshed.
+	d.result(t, &deal, "deal", "close", deal.ID)
+	reply, body = refresh(b, deal.ID, nil)
+	var closed struct{ Error struct{ Code string } }
+	json.Unmarshal(body, &closed)
+	if reply.StatusCode != http.StatusConflict || closed.Error.Code != "deal_closed" || cards() != 2 {
+		t.Errorf("a refresh of a closed deal: %d %s", reply.StatusCode, body)
+	}
+	d.everyToolIsNamed(t)
+}
+
+// A refreshed card is the deal's it was asked for, or is not published. A deal that closed before the card
+// was read, one that closes while it is read, and one that closes while another opens, each publish nothing.
+func TestARefreshedCardIsOnlyTheDealsAskedFor(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	every := func() int { return d.count(t, `SELECT count(*) FROM cards`) }
+	// publish makes the card as a refresh of the deal does, running during once, before its first read.
+	publish := func(only string, during func()) error {
+		t.Helper()
+		from, err := workspaceReads(ctx, d.owner, d.workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := from.open(ctx, "crm", "calls", "slack"); err != nil {
+			t.Fatal(err)
+		}
+		scopes := []string{"crm:read", "calls:read", "slack:read"}
+		_, err = from.publish(ctx, cards.Principal{WorkspaceID: d.workspace.ID, PrincipalID: principal.ID,
+			TokenID: receipts.Fingerprint(randomToken()), Scopes: scopes, Verify: func() ([]string, bool) {
+				if during != nil {
+					during()
+					during = nil
+				}
+				return scopes, true
+			}}, "acc-003", from.day(), only)
+		return err
+	}
+	var first, second, third dealResult
+	d.result(t, &first, "deal", "new", "acc-003")
+	if err := publish(first.ID, nil); err != nil {
+		t.Fatalf("a refresh of the open deal: %v", err)
+	}
+	before := every()
+	// The deal closed, and the account's next one is open.
+	d.result(t, &first, "deal", "close", first.ID)
+	d.result(t, &second, "deal", "new", "acc-003")
+	if err := publish(first.ID, nil); !errors.Is(err, postgres.ErrDealChanged) || every() != before {
+		t.Errorf("a card for a deal that closed before it was read: %v, %d cards", err, every()-before)
+	}
+	// The deal closes while its card is read, and the account has none open as the card is published.
+	closing := func() {
+		if _, _, err := d.owner.CloseDeal(ctx, d.workspace.ID, second.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := publish(second.ID, closing); !errors.Is(err, postgres.ErrDealChanged) || every() != before {
+		t.Errorf("a card for a deal that closed while it was read: %v, %d cards", err, every()-before)
+	}
+	// The deal closes while its card is read, and the account's next one is open as the card is published.
+	d.result(t, &third, "deal", "new", "acc-003")
+	var fourth dealResult
+	swapping := func() {
+		d.result(t, &third, "deal", "close", third.ID)
+		d.result(t, &fourth, "deal", "new", "acc-003")
+	}
+	if err := publish(third.ID, swapping); !errors.Is(err, postgres.ErrDealChanged) || every() != before {
+		t.Errorf("a card for a deal that gave way to the next while it was read: %v, %d cards", err, every()-before)
+	}
+	if n := d.count(t, `SELECT count(*) FROM deal_cards WHERE deal_ref = $1`, fourth.ID); n != 0 {
+		t.Errorf("the next deal got %d cards of a refresh of the one before it", n)
 	}
 }
