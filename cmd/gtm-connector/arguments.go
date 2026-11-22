@@ -36,7 +36,8 @@ var (
 )
 
 var commands = map[string]arguments{
-	"accounts": {options: []option{{name: "--query", value: true}}, help: accountsHelp},
+	"accounts": {options: []option{{name: "--query", value: true}, {name: "--account-number", value: true}},
+		help: accountsHelp},
 	"brief": {options: []option{{name: "--as-of", value: true}, {name: "--without-calls"}}, required: "account_id",
 		help: briefHelp},
 	"inspect": {options: []option{{name: "--role", value: true, choices: []string{"customer", "customer_side_not_in_crm", "seller",
@@ -246,9 +247,10 @@ func cardNumber(text string) bool {
 }
 
 const accountsHelp = `usage: gtm-connector accounts [-h] [--json] [--state-dir STATE_DIR]
-                              [--query QUERY]
+                              [--query QUERY | --account-number NUMBER]
 
-Search the connected CRM by account name.
+Search the connected CRM by account name, or a Salesforce org by account
+number.
 
 options:
   -h, --help            show this help message and exit
@@ -256,6 +258,9 @@ options:
   --state-dir STATE_DIR
                         Read this workspace (default: demo).
   --query QUERY         Match account names that hold these words, in order.
+  --account-number NUMBER
+                        Salesforce only: match the accounts with exactly this
+                        AccountNumber.
 
 Example: gtm-connector accounts --query Thornfield
 `
@@ -267,7 +272,8 @@ const briefHelp = `usage: gtm-connector brief [-h] [--json] [--state-dir STATE_D
 Print the Deal card for one account from the connected sources.
 
 positional arguments:
-  account_id            Select an account, such as acc-003.
+  account_id            Select an account by its ID, such as acc-003, or by a
+                        name that accounts finds one account for.
 
 options:
   -h, --help            show this help message and exit
@@ -405,8 +411,9 @@ options:
                         With salesforce: require this environment (default:
                         developer).
   --seller SELLER       With salesforce, calls, or slack: list this name or
-                        Slack ID as a seller. Repeat for each. The list
-                        replaces the saved one.
+                        Slack ID as a seller. Repeat for each. The list is
+                        the workspace's, shared by its sources, and replaces
+                        the saved one. Given once as '', it clears the list.
   --remove              Detach this source. Removing the CRM removes its calls
                         and Slack.
   --transport {http,stdio}

@@ -449,7 +449,23 @@ func (r *run) slackMap(ctx context.Context) (*strictjson.Object, error) {
 	case errors.Is(err, postgres.ErrSourceChanged):
 		return nil, receipts.ErrSourceChanged
 	case errors.Is(err, postgres.ErrSlackMappingConflict):
-		return nil, slackRefusal("slack_mapping_conflict")
+		// The refusal names the flag that fits what is saved.
+		refusal := slackRefusal("slack_mapping_conflict")
+		var conflict *postgres.SlackMappingConflict
+		if errors.As(err, &conflict) {
+			switch {
+			case conflict.Replace && conflict.Reassign:
+				refusal.message = "slack_mapping_conflict: This account has another thread selected, and this thread " +
+					"is selected for another account. Repeat with --replace and --reassign to move it here."
+			case conflict.Replace:
+				refusal.message = "slack_mapping_conflict: This account has another thread selected. Repeat with " +
+					"--replace to select this one in its place."
+			case conflict.Reassign:
+				refusal.message = "slack_mapping_conflict: This thread is selected for another account. Repeat with " +
+					"--reassign to move it to this account."
+			}
+		}
+		return nil, refusal
 	case errors.Is(err, postgres.ErrSlackMappingSource):
 		return nil, slackRefusal("slack_source_mismatch")
 	case err != nil:
@@ -840,9 +856,9 @@ func (r *run) slackText(result *strictjson.Object) string {
 				row = append(row, get(object, key))
 			}
 			if !r.screen.terminal {
-				row = append(row, get(object, "message"), get(object, "next"))
+				row = append(row, get(object, "code"), get(object, "message"), get(object, "next"))
 			} else if get(object, "status") == "fail" {
-				text := oneLine(cellText(get(object, "message")))
+				text := oneLine(cellText(get(object, "code")) + ": " + cellText(get(object, "message")))
 				if next, _ := get(object, "next").(string); next != "" {
 					text += "\nNext: " + oneLine(next)
 				}
@@ -851,7 +867,7 @@ func (r *run) slackText(result *strictjson.Object) string {
 			rows = append(rows, row)
 		}
 		if !r.screen.terminal {
-			headers = append(headers, "DETAIL", "NEXT")
+			headers = append(headers, "CODE", "DETAIL", "NEXT")
 		}
 		text := headline + r.screen.table(headers, rows)
 		for _, detail := range failed {

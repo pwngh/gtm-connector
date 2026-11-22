@@ -826,6 +826,9 @@ A step's `code` is `ok` or one of the reasons under [Errors](#slack-errors), or 
 `prerequisite_failed`, `slack_check_failed`, `slack_metrics_unavailable` (the source-work counts
 could not be verified) or `slack_receipt_invalid` (no final receipt matches the result).
 
+As text the report is a table. In a pipe each row ends with the step's code, its message and what to
+run next. On a terminal a failed step's code and message follow the table.
+
 ### Other Slack results
 
 | Result | Fields |
@@ -888,7 +891,7 @@ A reason sets the exit code of a command, and is a step `code` in `debug slack c
 | `slack_account_ambiguous` | 3 | Pass the account ID with `--account`. |
 | `slack_association_failed`, `slack_association_invalid` | 4 | The CRM lookup failed, and nothing was saved. Check the CRM connection. |
 | `slack_crm_unavailable` | 5 | Check CRM access, then retry. |
-| `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `debug slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
+| `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `debug slack map` for the account. A conflict says which flag it needs: `--replace` when the account has another thread, `--reassign` when the thread is another account's. |
 | `slack_source_mismatch` | 3 | Connect the original CRM and Slack identity in the original workspace. |
 | `slack_identity_unchecked` | 3 | Run `debug slack status --check`. |
 | `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope, the profile scopes and channel access. For a changed or incomplete thread, retry when it is stable. |

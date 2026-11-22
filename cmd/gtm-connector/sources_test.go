@@ -102,7 +102,7 @@ func (c *inventedCRM) Read(ctx context.Context, tool, accountID string) ([]*stri
 	return records, err
 }
 
-func (c *inventedCRM) SearchAccounts(ctx context.Context, query string) ([]*strictjson.Object, bool, error) {
+func (c *inventedCRM) SearchAccounts(ctx context.Context, query string, number *string) ([]*strictjson.Object, bool, error) {
 	c.started()
 	if c.answer != nil {
 		if records, answered, err := c.answer(ctx, "search_accounts"); answered {

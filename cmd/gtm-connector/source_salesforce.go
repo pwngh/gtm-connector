@@ -46,10 +46,10 @@ var salesforceOptions salesforce.Options
 var salesforceFailures = map[string][2]string{
 	"salesforce_invalid_configuration": {
 		"Salesforce credentials or the sf CLI configuration are unavailable.",
-		"Run sf org login web --alias acme-dev, then repeat with --sf-org acme-dev."},
+		"Run sf org login web --alias ALIAS for the org's alias, then repeat the command."},
 	"salesforce_edition_required": {
 		"The selected org did not report Developer Edition.",
-		"Select a Developer Edition alias with --sf-org."},
+		"Use the alias of a Developer Edition org."},
 	"salesforce_environment_mismatch": {
 		"The selected org does not match the expected Salesforce environment.",
 		"Check the selected alias and repeat with the intended --sf-environment."},
@@ -61,7 +61,7 @@ var salesforceFailures = map[string][2]string{
 		"Run gtm-connector debug salesforce check with the same alias and environment to see the missing fields."},
 	"salesforce_auth_required": {
 		"The sf CLI login or token refresh did not provide usable credentials.",
-		"Install Salesforce CLI if missing. Run sf org login web --alias acme-dev, then repeat with --sf-org acme-dev."},
+		"Install Salesforce CLI if missing. Run sf org login web --alias ALIAS for the org's alias, then repeat the command."},
 	"salesforce_cli_timeout": {
 		"The Salesforce CLI (sf) did not answer within its time limit, so no login was read.",
 		"The computer may be busy. Repeat the command. To time sf alone, run sf org display with the same alias."},
@@ -396,12 +396,12 @@ func (c *salesforceCRM) Read(ctx context.Context, tool, accountID string) ([]*st
 	return records, c.failed(err)
 }
 
-func (c *salesforceCRM) SearchAccounts(ctx context.Context, query string) ([]*strictjson.Object, bool, error) {
+func (c *salesforceCRM) SearchAccounts(ctx context.Context, query string, number *string) ([]*strictjson.Object, bool, error) {
 	reader, err := c.signedIn(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	accounts, more, err := reader.SearchAccounts(ctx, query, nil, nil)
+	accounts, more, err := reader.SearchAccounts(ctx, query, number, nil)
 	return accounts, more, c.failed(err)
 }
 
@@ -710,7 +710,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 	}
 	if !before {
 		step("account_search", checked, func() (int, string, error) {
-			found, _, err := from.searchAccounts(ctx, "")
+			found, _, err := from.searchAccounts(ctx, "", nil)
 			return len(found), "The bounded Account search completed.", err
 		})
 		var account string

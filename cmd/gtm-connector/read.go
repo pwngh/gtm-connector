@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
@@ -255,9 +256,18 @@ func (r *run) result(ctx context.Context) (any, error) {
 	return r.audit(ctx)
 }
 
-// accounts searches the connected CRM by name. A complete list is an array. A cut one is an object that
-// says so. Names are shown inert.
+// accounts searches the connected CRM by name, or with --account-number a Salesforce org by exact account
+// number. Names are shown inert.
 func (r *run) accounts(ctx context.Context) (any, error) {
+	query, named := r.args.text("--query")
+	var number *string
+	if given, numbered := r.args.text("--account-number"); numbered {
+		// The same bounds the reader holds a number to, checked before anything is opened or read.
+		if named || strings.TrimSpace(given) == "" || utf8.RuneCountInString(given) > 40 {
+			return nil, refused("--account-number is one account number of 1 to 40 characters, given without --query.")
+		}
+		number = &given
+	}
 	if err := r.open(ctx); err != nil {
 		return nil, err
 	}
@@ -269,8 +279,7 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	r.announce(from.crmLine())
-	query, _ := r.args.text("--query")
-	found, more, err := from.searchAccounts(ctx, query)
+	found, more, err := from.searchAccounts(ctx, query, number)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +292,41 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	return strictjson.NewObject("accounts", shown, "has_more", more), nil
+}
+
+// accountNamed is the ID of the one account whose name holds the words of name, as accounts searches, which
+// it names on stderr. More than one is refused with the IDs found, and without the text typed: a name is
+// source text, shown inert, and what was typed may be a credential. With no account of the name, it gives
+// the text back, for the maker to refuse as an ID.
+func (r *run) accountNamed(ctx context.Context, from *reads, name string) (string, error) {
+	found, more, err := from.searchAccounts(ctx, name, nil)
+	if err != nil {
+		return "", err
+	}
+	const next = "gtm-connector accounts --query NAME"
+	if len(found) == 0 {
+		// No account has the name, so the text is taken as the ID it may have been meant as, and the maker
+		// says what form an ID has.
+		return name, nil
+	}
+	shown := make([]string, 0, 5)
+	for _, account := range found[:min(len(found), 5)] {
+		safe, err := neutral(get(account, "name"))
+		if err != nil {
+			return "", err
+		}
+		shown = append(shown, cellText(get(account, "id"))+" "+strictjson.Quote(oneLine(cellText(safe))))
+	}
+	if len(found) > 1 {
+		count := fmt.Sprint(len(found))
+		if more {
+			count = "More than " + count
+		}
+		return "", &failure{code: 2, next: next, message: count + " accounts match. Give one account's ID: " +
+			strings.Join(shown, ", ") + "."}
+	}
+	r.announce("Account: " + shown[0] + ".")
+	return cellText(get(found[0], "id")), nil
 }
 
 // brief reads one account through the card maker and publishes its card. The raw records stay in the
@@ -311,6 +355,12 @@ func (r *run) brief(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	r.announce(from.sourcesLine())
+	// What is no account ID of either CRM is taken as the account's name, and searched for.
+	if !evidence.ValidAccountID(account, false) && !evidence.ValidAccountID(account, true) {
+		if account, err = r.accountNamed(ctx, from, account); err != nil {
+			return nil, err
+		}
+	}
 	// The maker's own checks of the request come before any lookup or write: an account ID that is not of
 	// this workspace's CRM, or a day that is not one, is refused with nothing read and nothing written.
 	if err := cards.CheckRequest(from.sources(), account, asOf); err != nil {

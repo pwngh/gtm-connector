@@ -159,6 +159,12 @@ func (r *run) connect(ctx context.Context) (any, error) {
 		}
 		return result(status, rows, connectedSources(rows))
 	}
+	// A list given once with an empty value is cleared.
+	for _, list := range speakerOptions {
+		if given := r.args.lists[list]; len(given) == 1 && given[0] == "" {
+			r.args.lists[list] = []string{}
+		}
+	}
 	sellers, listed := r.args.lists["--seller"]
 	if listed && !validSellers(sellers) {
 		return nil, refused("Name at most 200 sellers with --seller, each a name or Slack ID of 1 to 200 characters.")

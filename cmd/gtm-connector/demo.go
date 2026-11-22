@@ -190,7 +190,7 @@ func (r *run) renewal(ctx context.Context) (any, error) {
 	lookup.request, lookup.tool, lookup.arguments = 1, "search_accounts", strictjson.NewObject("query", renewalName)
 	searched, found, err := from.call(ctx, lookup,
 		func(ctx context.Context) ([]*strictjson.Object, error) {
-			accounts, _, err := crm.SearchAccounts(ctx, renewalName)
+			accounts, _, err := crm.SearchAccounts(ctx, renewalName, nil)
 			return referenced(accounts), err
 		})
 	if err != nil {

@@ -17,14 +17,21 @@ import (
 func (r *run) human(result any) string {
 	switch r.command {
 	case "accounts":
+		// A Salesforce account carries its account number and no renewal date of its own; one of the demo
+		// book carries its renewal date.
 		rows, _ := get(result.(*strictjson.Object), "accounts").([]any)
+		last, heading := "renewal_date", "RENEWAL"
+		if len(rows) > 0 {
+			if _, numbered := rows[0].(*strictjson.Object).Get("account_number"); numbered {
+				last, heading = "account_number", "NUMBER"
+			}
+		}
 		cells := make([][]any, len(rows))
 		for i, row := range rows {
 			account := row.(*strictjson.Object)
-			cells[i] = []any{get(account, "id"), get(account, "name"), get(account, "industry"),
-				get(account, "renewal_date")}
+			cells[i] = []any{get(account, "id"), get(account, "name"), get(account, "industry"), get(account, last)}
 		}
-		return r.screen.table([]string{"ID", "ACCOUNT", "INDUSTRY", "RENEWAL"}, cells)
+		return r.screen.table([]string{"ID", "ACCOUNT", "INDUSTRY", heading}, cells)
 	case "brief":
 		return r.cardText(result.(*strictjson.Object))
 	case "audit":
