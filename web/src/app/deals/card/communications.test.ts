@@ -103,7 +103,7 @@ test('every golden card: each sentence unit once, in its own call or message, wh
     }
     assert.doesNotMatch(html, /dc-ledger|data-quote-unit|data-more-unit/, `${at}: nothing of the Card tab`);
   }
-  assert.equal(sentences, 90 + 1297 + 73 + 127);
+  assert.equal(sentences, 90 + 1297 + 89 + 127);
   assert.ok(withHidden >= 12, `${withHidden} golden cards have sentences the card does not show`);
 });
 
