@@ -207,19 +207,30 @@ func (r *run) showDeal(ctx context.Context) (any, error) {
 	}
 	var card any
 	if deal.LatestCard != nil {
-		from, err := r.reads(ctx)
-		if errors.Is(err, errNotConnected) {
-			return nil, refused("%s", cards.ErrNoCard)
-		}
+		// A deal's newest card may be a brief an assistant prepared, which the assistant reads back and no
+		// command shows: the deal names it, and its card here is null. That is told from the stored card
+		// alone, before the workspace's sources are looked at.
+		prepared, err := r.preparedBrief(ctx, deal.LatestCard.BriefID)
 		if err != nil {
 			return nil, err
 		}
-		sealed, err := r.sealed(ctx, deal.LatestCard.BriefID, from.sources())
-		if err != nil {
-			return nil, err
+		if prepared {
+			value.Set("latest_card_prepared", true)
+		} else {
+			from, err := r.reads(ctx)
+			if errors.Is(err, errNotConnected) {
+				return nil, refused("%s", cards.ErrNoCard)
+			}
+			if err != nil {
+				return nil, err
+			}
+			sealed, err := r.sealed(ctx, deal.LatestCard.BriefID, from.sources())
+			if err != nil {
+				return nil, err
+			}
+			sealed.Delete("evidence")
+			card = sealed
 		}
-		sealed.Delete("evidence")
-		card = sealed
 	}
 	read := []any{}
 	for _, m := range deal.Read {
@@ -478,6 +489,9 @@ func (r *run) dealText(action string, result any) string {
 	case action != "show":
 	case card != nil:
 		text += "\n\n" + r.cardText(card)
+	case get(deal, "latest_card_prepared") == true:
+		text += "\n\n" + oneLine("The deal's newest card is a brief an assistant prepared, which the assistant reads "+
+			"back. Make a card to read here: gtm-connector brief "+get(deal, "account").(string)+r.here())
 	default:
 		text += "\n\n" + oneLine("No card yet. Make one: gtm-connector brief "+get(deal, "account").(string)+r.here())
 	}

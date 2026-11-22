@@ -238,7 +238,16 @@ func (s *server) prepare(ctx context.Context, view Opened, inv *mcp.Invocation, 
 	if err := s.requireGranted(ctx, inv, account); err != nil {
 		return nil, err
 	}
-	maker := &cards.Maker{Receipts: s.Receipts, Source: view.Source, Sources: view.Sources, Connections: view.Connections,
+	// The brief is its account's open deal's card, when the workspace has deals: it is bound to the deal as it
+	// is published, and reads the account's call and thread only when they are matched to that deal.
+	publishing := s.Receipts
+	if view.Card != nil {
+		var err error
+		if publishing, err = view.Card(ctx, account); err != nil {
+			return nil, err
+		}
+	}
+	maker := &cards.Maker{Receipts: publishing, Source: view.Source, Sources: view.Sources, Connections: view.Connections,
 		Generations: view.Generations, NewID: s.NewID, Now: s.Now}
 	sealed, err := maker.Prepare(ctx, cards.Prepare{Principal: s.principal(inv), Selection: s.Selection,
 		Outer: &outer, Arguments: arguments})

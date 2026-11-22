@@ -19,6 +19,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -199,10 +200,30 @@ func toolSources(store *postgres.Store, workspace postgres.Workspace) func(conte
 		mu.Lock()
 		held.row, held.crm = row, opened
 		mu.Unlock()
-		// The tools read an account's imported call and mapped thread through the gate every card reads by.
+		// The tools read an account's imported call and mapped thread through the gate every card reads by. A
+		// brief is made for the account's open deal, as brief makes a card: its calls and threads are matched
+		// first, the gate then admits only those matched to that deal, and the publication binds the card to
+		// the deal that is open then.
 		from.gate = &matchGate{store: store, workspace: workspace.ID}
+		forDeal := func(ctx context.Context, account string) (receipts.Store, error) {
+			// What a card before this one read is no part of this one.
+			from.gate.read = postgres.CardDeal{}
+			deal, open, err := store.OpenDeal(ctx, workspace.ID, account)
+			if err != nil {
+				return nil, err
+			}
+			if open {
+				if _, err := store.MatchAccount(ctx, workspace.ID, account); err != nil {
+					return nil, err
+				}
+				// A brief read for a deal is that deal's or is not saved: one whose deal closed during the
+				// call left out what an account's own brief would read.
+				from.gate.read.Ref, from.gate.read.Required = deal.Ref, true
+			}
+			return &postgres.ReceiptStore{Store: store, OpenDeal: &from.gate.read}, nil
+		}
 		return mcptools.Opened{Source: servedBook{cardSource{from}, served}, Sources: from.sources(),
-			Connections: from.connections(), Generations: from.generations()}, nil
+			Connections: from.connections(), Generations: from.generations(), Card: forDeal}, nil
 	}
 }
 

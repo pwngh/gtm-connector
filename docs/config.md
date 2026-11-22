@@ -69,15 +69,17 @@ and the connector matches each to a deal of that account:
   deal took. A person who then keeps it on the closed deal is not asked again for that open deal;
   the account's next deal asks again. A call with a time stays on the deal that holds it.
 - **When it is decided:** as a deal is registered, as a call is imported or a thread mapped while the
-  account has an open deal, and before `brief` reads the account. The connector decides an item once,
+  account has an open deal, and before `brief`, a refresh or an assistant's `prepare_renewal_brief`
+  reads the account. The connector decides an item once,
   and a second time only to make it wait between a closed deal and the open one. A person may decide
   it again.
 - **What a deal's card reads:** the account's current call and thread only when they are matched to
   that deal. Otherwise the card says `Calls: not read. The account's transcript is not matched to this
-  card.` or `Slack: not read. The account's thread is not matched to this card.` Every other card,
-  made while the account has no open deal or through MCP, reads them unless they wait for a person or
-  were rejected, and says the same when they do; an MCP read of them is refused as `calls_not_matched` or
-  `slack_not_matched`.
+  card.` or `Slack: not read. The account's thread is not matched to this card.` A brief an assistant
+  prepares through MCP while the account has an open deal is made for that deal by the same rule. A
+  card or a brief made while the account has no open deal reads them unless they wait for a person or
+  were rejected, and says the same when they do; so does a direct MCP read of them, which is then
+  refused as `calls_not_matched` or `slack_not_matched`.
 - **A stale match** is one whose call or thread is no longer the account's current import or mapping.
   It leaves the queue, since no card can read it, and the full lists mark it `stale`.
 - **Every decision has a receipt.** A `decide_match` receipt names the item, the decision and the deal,

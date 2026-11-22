@@ -66,8 +66,11 @@ account: `thornfield-2027-2e3hke` for Thornfield Wren LLP (`acc-003`), renewing 
 - The account's next deal of the same year takes the lowest free number from 2:
   `thornfield-2027-2e3hke-2`. An ID is never given twice.
 
-An account has one open deal at a time. While it has one, every card `brief` makes for the account
-belongs to that deal, and `GET /v1/deals/{id}` returns the newest. The deal is found when the card is
+An account has one open deal at a time. While it has one, every card `brief` or a refresh makes for the
+account belongs to that deal, and `GET /v1/deals/{id}` returns the newest. A brief an assistant prepares
+with `prepare_renewal_brief` belongs to the deal too, and is its newest card until `brief` or a refresh
+makes another: `read_deal_card` gives it, and `deal show` names it without its text, since the commands
+show cards `brief` made. The deal is found when the card is
 published, in the same transaction, so a deal registered while `brief` reads the account still gets
 the card, unless the card read an imported call or a mapped thread for no deal or for another one: then
 it is not published, and `brief` says to run it again. With none, `brief` makes the account's own card,
@@ -118,8 +121,8 @@ leaves it out.
 
 `account_name` is source text, neutralized. `registered_by` is the principal that registered the deal
 through the API, or `null` for one `deal new` registered. `reads` are the receipts of the two reads it
-was registered on, which `GET /api/v1/receipts/{receipt}` serves. `latest_card` is `null` until
-`brief` makes the deal's card.
+was registered on, which `GET /api/v1/receipts/{receipt}` serves. `latest_card` is `null` until a
+card is published for the deal: by `brief`, by a refresh, or as a brief an assistant prepares.
 
 `POST /v1/deals` registers the deal as the signed-in person: both reads name them. The grant is checked
 before any source is opened, and again just before each read. Without a live grant on the account,

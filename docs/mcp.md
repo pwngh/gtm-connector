@@ -319,6 +319,12 @@ connected, then its Slack thread when the account's `slack` is `true`. Each read
 own, linked to the call's receipt by `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`,
 checks the token again, and counts against its rate.
 
+While the account has an open [deal](api.md#one-deal-one-id), the brief is made for that deal: the
+account's call and thread are matched first, the brief reads them only when they are matched to the
+deal, and it is bound to the deal as it is saved. It is then the deal's newest card, which
+`read_deal_card` gives, until `brief`, a refresh or another prepared brief makes a newer one. A brief
+whose deal closes while it is read is not saved.
+
 A read the token has no scope for is receipted as refused, with HTTP 403, and the card says so: a token
 without `calls:read` gets a card whose `NOT READ` section says `Calls: not read. The grant lacks
 calls:read.` The call's own receipt is the brief's seal: it is finished with the digest of the saved
