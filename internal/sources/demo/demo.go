@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
+	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
 // The tables each read uses, by database.
@@ -77,9 +78,24 @@ func asciiLower(s string) string {
 	return string(b)
 }
 
-// SearchAccounts is store.search_accounts: the accounts whose name holds the literal query, ignoring ASCII
-// case, ordered by name without ASCII case and then by ID. It returns the first 100, each with its columns
-// in table order, and whether more matched.
+// holds is whether a name holds the words of a query in their order, each as literal text, with anything
+// between them, so a name written with two spaces is found by its words. Only the letters A to Z fold. A
+// query with no word matches every name.
+func holds(name, query string) bool {
+	rest := asciiLower(name)
+	for _, word := range strings.FieldsFunc(asciiLower(query), unicodetab.IsSpace) {
+		at := strings.Index(rest, word)
+		if at < 0 {
+			return false
+		}
+		rest = rest[at+len(word):]
+	}
+	return true
+}
+
+// SearchAccounts is the accounts whose name holds the query's words (see holds), ordered by name without
+// ASCII case and then by ID. It returns the first 100, each with its columns in table order, and whether
+// more matched.
 func (s *Store) SearchAccounts(query string) (accounts []*strictjson.Object, more bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -100,8 +116,8 @@ func (s *Store) SearchAccounts(query string) (accounts []*strictjson.Object, mor
 		if name >= 0 {
 			text, _ = row[name].(string)
 		}
-		if folded := asciiLower(text); strings.Contains(folded, asciiLower(query)) {
-			found = append(found, match{folded, row})
+		if holds(text, query) {
+			found = append(found, match{asciiLower(text), row})
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool {
@@ -290,25 +306,24 @@ func (s *Store) Read(_ context.Context, tool, accountID string) (source string, 
 // SearchRows is how many accounts one search returns.
 const SearchRows = 100
 
-// Search is search_accounts on the demo CRM (store.search_accounts): the accounts whose name contains the
-// literal query, ignoring ASCII case, ordered by name without ASCII case and then by ID. It returns the first
-// SearchRows of them and whether more matched. accounts, when not nil, limits the search to those IDs before
+// Search is search_accounts on the demo CRM: the accounts whose name holds the query's words (see holds),
+// ordered by name without ASCII case and then by ID. It returns the first SearchRows of them and whether
+// more matched. accounts, when not nil, limits the search to those IDs before
 // the order and the bound.
 func (s *Store) Search(query string, accounts []string) (records []*strictjson.Object, more bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t := s.tables["crm/accounts"]
 	name := t.column("name")
-	needle := lowerASCII(query)
 	var found [][]any
 	for _, row := range t.rows {
 		text, _ := row[name].(string)
-		if strings.Contains(lowerASCII(text), needle) && (accounts == nil || slices.Contains(accounts, row[0].(string))) {
+		if holds(text, query) && (accounts == nil || slices.Contains(accounts, row[0].(string))) {
 			found = append(found, row)
 		}
 	}
 	sort.SliceStable(found, func(i, j int) bool {
-		a, b := lowerASCII(found[i][name].(string)), lowerASCII(found[j][name].(string))
+		a, b := asciiLower(found[i][name].(string)), asciiLower(found[j][name].(string))
 		if a != b {
 			return a < b
 		}
@@ -335,17 +350,6 @@ func (s *Store) Opportunities(accounts []string) []*strictjson.Object {
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i][0].(string) < found[j][0].(string) })
 	return t.records("crm", "opportunities", found)
-}
-
-// lowerASCII is SQLite's lower(): only the letters A to Z change.
-func lowerASCII(text string) string {
-	out := []byte(text)
-	for i, c := range out {
-		if c >= 'A' && c <= 'Z' {
-			out[i] = c + ('a' - 'A')
-		}
-	}
-	return string(out)
 }
 
 // column is the position of a named column.

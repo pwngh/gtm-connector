@@ -714,8 +714,9 @@ func among(value any, list []string) bool {
 	return false
 }
 
-// SearchAccounts gives the accounts whose name holds the query as literal text, the first 100 by name and
-// then ID, and whether more match. With an account number it gives the accounts with exactly that
+// SearchAccounts gives the accounts whose name holds the query's words in their order, each as literal text
+// with anything between them, the first 100 by name and then ID, and whether more match. So a name written
+// with two spaces is found by its words, and a query with no word finds every account. With an account number it gives the accounts with exactly that
 // AccountNumber. A selection limits the query to its accounts; nil is no selection.
 func (r *Reader) SearchAccounts(ctx context.Context, query string, accountNumber *string,
 	selected []string) (accounts []*strictjson.Object, more bool, err error) {
@@ -736,8 +737,8 @@ func (r *Reader) SearchAccounts(ctx context.Context, query string, accountNumber
 			return nil, false, err
 		}
 		// The row past the bound is read only to learn that it exists.
-		if query != "" {
-			where = " WHERE Name LIKE '%" + escaped + "%'"
+		if words := strings.FieldsFunc(escaped, unicodetab.IsSpace); len(words) > 0 {
+			where = " WHERE Name LIKE '%" + strings.Join(words, "%") + "%'"
 		}
 	}
 	if selection != "" && where != "" {

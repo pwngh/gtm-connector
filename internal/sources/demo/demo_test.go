@@ -97,6 +97,7 @@ func TestSearchAndOpportunitiesAsThePythonStore(t *testing.T) {
 		{"", nil, " 001 017 028 022 011 024 005 018 002 025 021 009 006 029 007 015 019 014 008 027 010 016 013 030 012 020 023 003 004 026"},
 		{"a", nil, " 001 017 028 022 005 018 025 021 009 006 029 007 015 019 014 008 027 010 012 020 023 004 026"},
 		{"VALE", nil, " 001"}, {"llp", nil, " 003"}, {"Alder Vale Packaging", nil, " 001"}, {"zz", nil, ""},
+		{"alder  packaging", nil, " 001"}, {"packaging alder", nil, ""}, {"  ", two, " 001 003"},
 		{"", two, " 001 003"}, {"thorn", two, " 003"}, {"thorn", []string{"acc-001"}, ""},
 	} {
 		records, more := s.Search(c.query, c.accounts)
@@ -186,9 +187,14 @@ func TestSearchAccounts(t *testing.T) {
 		}
 		return found, more
 	}
-	// Only the letters A to Z fold, in the match and in the order, and the query is literal.
+	account("acc-905", "Birch  Mills plc")
+	// Only the letters A to Z fold, in the match and in the order, and each word of the query is literal. A
+	// name holds the query's words in their order, with anything between them, so a name written with two
+	// spaces is found by its words.
 	for query, want := range map[string][]string{"alder vale": {"acc-001", "acc-901", "acc-902"},
-		"élan": {"acc-904"}, "ÉLAN": {"acc-903"}, "ELAN": nil, "%": nil, "THORN": {"acc-003"}} {
+		"élan": {"acc-904"}, "ÉLAN": {"acc-903"}, "ELAN": nil, "%": nil, "THORN": {"acc-003"},
+		"Birch Mills": {"acc-905"}, " birch   plc ": {"acc-905"}, "Mills Birch": nil, "alder packaging": {"acc-001", "acc-901", "acc-902"},
+		"ch Mi": {"acc-905"}} {
 		if got, more := ids(query); more || !slices.Equal(got, want) {
 			t.Errorf("%q finds %v (more: %v), not %v", query, got, more, want)
 		}
@@ -205,7 +211,7 @@ func TestSearchAccounts(t *testing.T) {
 	if got, more := ids("many"); more || len(got) != 100 || got[0] != "acc-100" || got[99] != "acc-199" {
 		t.Errorf("a hundred matches: %d from %s to %s, more: %v", len(got), got[0], got[len(got)-1], more)
 	}
-	if got, more := ids(""); !more || len(got) != 100 || got[0] != "acc-001" || got[99] != "acc-181" {
+	if got, more := ids(""); !more || len(got) != 100 || got[0] != "acc-001" || got[99] != "acc-180" {
 		t.Errorf("every account: %d from %s to %s, more: %v", len(got), got[0], got[len(got)-1], more)
 	}
 }
