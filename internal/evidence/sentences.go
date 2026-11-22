@@ -25,11 +25,13 @@ func fields(s []rune) [][]rune {
 	return found
 }
 
-// block is a run of text that no sentence crosses: a paragraph, and in a message also a block quote, a code
-// block, a list item or a speaker's turn. quoted is whether it is a block quote or a speaker's turn.
+// block is a run of text that no sentence crosses: a paragraph, or in a message a run of lines.
 type block struct {
 	text   []rune
-	quoted bool
+	breaks []int // in a message, where each line break inside the run stands in text, as one space
+	quoted bool  // lines of a block quote, or a speaker's turn and the lines under it
+	item   bool  // it starts with a list item, whose end is an end
+	code   bool  // a line of a code block, one sentence
 }
 
 // paragraphs splits text at a blank line: \n[ \t]*\n.
@@ -54,61 +56,82 @@ func paragraphs(s []rune) []block {
 	return append(found, block{text: s[start:]})
 }
 
-// messageBlocks splits a chat message into blocks. A line break is a wrap, except that a blank line ends a
-// block and each of these starts one: a line that starts a list item, a known person's turn (see turn), a
-// run of lines that start a block quote (> or &gt;), and the line that opens a code fence. The line after a
-// block quote, and the line after the one that closes a code fence, start one too. Inside a code block
-// nothing else starts a block. A block quote and a turn are marked quoted: the author relays someone else's
-// words, and a turn keeps its label in the text to say whose.
+// messageBlocks splits a chat message into blocks: runs of lines that follow each other with no blank line
+// between, all in a block quote (after >) or none. A list item and a known person's turn (see turn) start a
+// run, and each line of a code block, between its ``` fences, is a block of its own. A block quote and a
+// turn with the lines under it are marked quoted: the author relays someone else's words, and a turn keeps
+// its label in the text to say whose. A quote marker and a fence are markup, and no part of a block's text;
+// a quoted line with only its marker is a blank line, and a line of code with no letter or digit, such as a
+// brace, is no block. A code block opened in a block quote ends with the quote.
 func messageBlocks(s []rune, known func(name string) bool) []block {
 	var found []block
-	ended, fenced, quoting := true, false, false
+	// fenced: in a code block, whose fences stand in a block quote when fenceQuoted. open: the next line may
+	// join the last block, whose lines carry a quote marker when marked.
+	fenced, fenceQuoted, open, marked := false, false, false, false
 	for start := 0; start <= len(s); {
 		end := start
 		for end < len(s) && s[end] != '\n' {
 			end++
 		}
-		line := s[start:end]
+		line := strip(s[start:end])
 		start = end + 1
-		if spacesOnly(line) {
-			ended, quoting = true, false
+		quote := false
+		if !fenced || fenceQuoted {
+			for hasPrefix(line, ">") {
+				line, quote = strip(line[1:]), true
+			}
+		}
+		fenced = fenced && (quote || !fenceQuoted)
+		if fenced || hasPrefix(line, "```") {
+			if !fenced {
+				line, fenceQuoted = line[3:], quote
+			}
+			if fenced = !hasSuffix(line, "```"); !fenced {
+				line = line[:len(line)-3]
+			}
+			if lettered(line) {
+				found = append(found, block{text: spaced(line), quoted: quote, code: true})
+			}
+			open = false
 			continue
 		}
-		trimmed := strip(line)
-		begins, closes, quote, label := false, false, false, false
-		switch {
-		case fenced:
-			closes = hasSuffix(trimmed, "```")
-			fenced = !closes
-		case hasPrefix(trimmed, "```"):
-			begins = true
-			closes = len(trimmed) > 3 && hasSuffix(trimmed, "```")
-			fenced = !closes
-		case hasPrefix(trimmed, ">") || hasPrefix(trimmed, "&gt;"):
-			begins, quote = !quoting, true
-		default:
-			label = turn(trimmed, known)
-			begins = quoting || label || listItem(line)
+		if line = spaced(line); len(line) == 0 {
+			open = false
+			continue
 		}
-		if ended || begins {
-			found = append(found, block{quoted: quote || label})
-		} else {
-			found[len(found)-1].text = append(found[len(found)-1].text, '\n')
+		item := listItem(line)
+		label := !quote && !item && turn(line, known)
+		if last := len(found) - 1; open && !item && !label && marked == quote {
+			found[last].breaks = append(found[last].breaks, len(found[last].text))
+			found[last].text = append(append(found[last].text, ' '), line...)
+			continue
 		}
-		found[len(found)-1].text = append(found[len(found)-1].text, line...)
-		ended, quoting = closes, quote
+		found = append(found, block{text: line, quoted: quote || label, item: item})
+		open, marked = true, quote
 	}
 	return found
 }
 
-// spacesOnly is whether a line holds only spaces and tabs, as a blank line between paragraphs does.
-func spacesOnly(line []rune) bool {
-	for _, c := range line {
-		if c != ' ' && c != '\t' {
-			return false
+// lettered is whether text holds a letter or a digit of any script.
+func lettered(s []rune) bool {
+	for _, c := range s {
+		if u.IsAlpha(c) || u.IsDigit(c) {
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+// spaced is text with each run of spaces as one space, and none at its ends.
+func spaced(s []rune) []rune {
+	var line []rune
+	for i, field := range fields(s) {
+		if i > 0 {
+			line = append(line, ' ')
+		}
+		line = append(line, field...)
+	}
+	return line
 }
 
 func hasSuffix(s []rune, word string) bool {
@@ -154,48 +177,70 @@ func turn(line []rune, known func(name string) bool) bool {
 }
 
 // Sentences splits neutralized text into whole sentences. A line break inside a paragraph is a wrap;
-// only a blank line or closing punctuation ends a sentence. With lines, as in a Slack message, the blocks
-// messageBlocks finds end sentences too; with no person known, no line is a turn.
+// only a blank line or closing punctuation ends a sentence. With lines, as in a Slack message, a line break
+// ends one too, unless the text settles that the next line goes on; with no person known, no line is a turn.
 func Sentences(safe string, lines bool) ([]string, error) {
-	found, _, err := sentences(safe, lines, nil)
+	found, _, _, err := sentences(safe, lines, nil)
 	return found, err
 }
 
-// sentences is Sentences, with the people a turn may name, and whether each sentence lies in a block quote
-// or a turn.
-func sentences(safe string, lines bool, known func(name string) bool) ([]string, []bool, error) {
+// sentences is Sentences, with the people a turn may name. For each sentence it says whether it lies in a
+// block quote or a turn, and whether it stands at an end that needs no closing punctuation: the end of a
+// list item, or a line of a code block.
+//
+// In a message, Slack wraps no text, so a line break is one its author wrote, and it ends a sentence where
+// a space would not let it go on: after closing punctuation, as continues decides for a space there, so
+// "Dr." at the end of a line goes on; and with no closing punctuation, unless the next line starts in lower
+// case. A list item ends at the first line break that ends a sentence, or with its run.
+func sentences(safe string, lines bool, known func(name string) bool) (found []string, quoted, closed []bool, err error) {
 	if !utf8.ValidString(safe) {
-		return nil, nil, ErrInvalidText
+		return nil, nil, nil, ErrInvalidText
 	}
 	text := []rune(safe)
 	parts := paragraphs(text)
 	if lines {
 		parts = messageBlocks(text, known)
 	}
-	found, quoted := []string{}, []bool{}
-	for _, paragraph := range parts {
-		var line []rune
-		for i, field := range fields(paragraph.text) {
-			if i > 0 {
-				line = append(line, ' ')
-			}
-			line = append(line, field...)
+	found, quoted, closed = []string{}, []bool{}, []bool{}
+	for _, part := range parts {
+		line := part.text
+		if !lines {
+			line = spaced(line)
 		}
 		if len(line) == 0 {
 			continue
 		}
-		start := 0
-		for _, end := range SentenceEnds(line) {
-			if !continues(line, start, end.End1, end.End2) {
-				found, quoted = append(found, string(line[start:end.End1])), append(quoted, paragraph.quoted)
-				start = end.End2
+		start, item, ends, breaks := 0, part.item, SentenceEnds(line), part.breaks
+		add := func(to int, atEnd bool) {
+			found, quoted = append(found, string(line[start:to])), append(quoted, part.quoted)
+			closed = append(closed, part.code || item && atEnd)
+			item = item && !atEnd
+		}
+		for !part.code && len(ends)+len(breaks) > 0 {
+			if len(breaks) == 0 || len(ends) > 0 && ends[0].End1 <= breaks[0] {
+				// Closing punctuation, at a line break or inside a line.
+				end, atBreak := ends[0], len(breaks) > 0 && ends[0].End1 == breaks[0]
+				if ends = ends[1:]; atBreak {
+					breaks = breaks[1:]
+				}
+				if !continues(line, start, end.End1, end.End2) {
+					add(end.End1, atBreak)
+					start = end.End2
+				}
+				continue
+			}
+			// A line break with no sentence end before it for the next line to follow.
+			at := breaks[0]
+			if breaks = breaks[1:]; !u.IsLower(line[at+1]) {
+				add(at, true)
+				start = at + 1
 			}
 		}
 		if start < len(line) {
-			found, quoted = append(found, string(line[start:])), append(quoted, paragraph.quoted)
+			add(len(line), true)
 		}
 	}
-	return found, quoted, nil
+	return found, quoted, closed, nil
 }
 
 func count(s []rune, c rune, from, to int) int {
@@ -215,9 +260,9 @@ func continues(line []rune, start, end, after int) bool {
 	if after < n && u.IsLower(line[after]) {
 		return true
 	}
-	// A bracket opened in this sentence and closed soon after holds its own punctuation.
+	// A bracket or a quotation mark opened in this sentence and closed soon after holds its own punctuation.
 	near := max(start, end-200)
-	for _, pair := range [][2]rune{{'(', ')'}, {'[', ']'}} {
+	for _, pair := range [][2]rune{{'(', ')'}, {'[', ']'}, {'“', '”'}} {
 		if count(line, pair[0], near, end) > count(line, pair[1], near, end) &&
 			count(line, pair[1], end, min(end+200, n)) > 0 {
 			return true
@@ -234,18 +279,26 @@ func continues(line []rune, start, end, after int) bool {
 		return true
 	}
 	window := max(start-1, end-24, 0)
+	digit := after < n && u.IsDigit(line[after])
+	// "no." in lower case is a number sign only before a number or #, so "that is a no." ends its sentence.
+	if at, ok := NumberSign(line, window, end); ok && shortForm(line, at, end)[0] == 'n' {
+		return digit || after < n && line[after] == '#'
+	}
 	dotted, isDotted := Dotted(line, window, end)
 	if _, ok := MayEnd(line, window, end); ok || isDotted && u.IsUpperString(line[dotted:end]) {
 		_, opens := Opener(line, after, n)
 		return !opens
 	}
-	if _, ok := Abbreviation(line, window, end); isDotted || ok {
+	if at, ok := Abbreviation(line, window, end); isDotted || ok {
+		// A month or a day written short ends a sentence before a word that opens one: "in Feb. I'll".
+		if _, opens := Opener(line, after, n); ok && !isDotted && opens && calendar[shortForm(line, at, end)] {
+			return false
+		}
 		return true
 	}
 	if _, ok := SectionSign(line, after, n); ok {
 		return true
 	}
-	digit := after < n && u.IsDigit(line[after])
 	if _, wordStart, wordEnd, ok := Short(line, window, end); ok {
 		if _, next := ShortNext(line, after, n); next || wordEnd-wordStart < 5 && digit {
 			return true
@@ -255,4 +308,17 @@ func continues(line []rune, start, end, after int) bool {
 	// follows. The match ends at end.
 	_, number := NumberSign(line, window, end)
 	return number && (end-start > 5 || digit)
+}
+
+// calendar is the months and days of forms: short forms that often end a sentence.
+var calendar = words("Mon", "Tue", "Tues", "Wed", "Thu", "Thur", "Thurs", "Fri", "Sat", "Sun",
+	"Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Sept", "Oct", "Nov", "Dec")
+
+// shortForm is the letters of a short form that Abbreviation or NumberSign matched at at: the match starts
+// at the text's start or at the character before the form.
+func shortForm(line []rune, at, end int) string {
+	if at > 0 || !asciiLetter(line[at]) {
+		at++
+	}
+	return string(line[at:letters(line, at, end)])
 }

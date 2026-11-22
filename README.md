@@ -148,7 +148,7 @@ Role                  customer (by name)
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d2…
-Neutralizer version   5
+Neutralizer version   6
 Speaker rules         1
 Rung                  4
 Matched               name "Marian Holt"

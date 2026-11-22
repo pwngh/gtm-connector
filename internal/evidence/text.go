@@ -272,10 +272,16 @@ func token(kind rune, target, label []rune, labeled bool, counts *Counts) (strin
 	if linkHost(unescape(target, false), false) != host {
 		host = unknownHost
 	}
-	if text := strip(label); len(text) > 0 {
-		return string(text) + " [link " + host + "]", true
+	// A label that is the target as written, its address after mailto:, or the marker itself, which an
+	// address in the label has become by now, says nothing more than the link.
+	marker, address := "[link "+host+"]", target
+	if literalFold(target, 0, len(target), "mailto:") {
+		address = target[len("mailto:"):]
 	}
-	return "[link " + host + "]", true
+	if text := string(strip(label)); text != "" && text != string(target) && text != string(address) && text != marker {
+		return text + " " + marker, true
+	}
+	return marker, true
 }
 
 // substitute is re.sub with a scanner: match gives the end of a match at i, and its replacement.
@@ -339,6 +345,13 @@ func QuoteText(raw string) (string, Counts, error) {
 		text = quoted
 	}
 }
+
+// slackText is a Slack message's text as its author typed it. Slack stores the characters &, < and > that
+// are no markup of its own as &amp;, &lt; and &gt;, and each is read back once, in one pass, so "&amp;lt;"
+// gives "&lt;". It runs before the text is neutralized, so a < an author typed is read as any other.
+func slackText(raw string) string { return slackEntities.Replace(raw) }
+
+var slackEntities = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">")
 
 // apart puts a space between each ] and the ( right after it.
 func apart(s []rune) []rune {

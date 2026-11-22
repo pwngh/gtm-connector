@@ -88,7 +88,7 @@ the same record, or `null`.
 
 `inspect` answers from the sealed units and evidence, never from the card's text, and rebuilds
 nothing. A later change to the rules cannot move or refuse a number. A sentence sealed under an
-older version of the neutralizer rules (`sanitizer_version` below 5) has its text and speaker
+older version of the neutralizer rules (`sanitizer_version` below 6) has its text and speaker
 neutralized again under today's before `inspect`, the web API or a brief tool shows it. The card's
 bytes stay as sealed, so it still verifies, and the sentence keeps the version it was sealed under.
 
@@ -121,7 +121,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
-| `sanitizer_version` | The version of the neutralizer rules, `5`. |
+| `sanitizer_version` | The version of the neutralizer rules, `6`. |
 | `speaker_rules` | The version of the speaker rules the role was decided under, `1`. A unit sealed before them has no `speaker_rules`, `rung` or `matched`, and shows its role and basis as sealed. |
 | `rung` | The rung of the ladder that decided, `1` to `5`, or `0` when none did. |
 | `matched` | The identifier that decided, or `null`: `kind` (`email`, `slack_user`, `salesforce_contact`, `salesforce_user`, `name`, `listed_seller` or `alias`), `value`, neutralized, and `record_ref`, the record it came from, or `null` for a listed seller or an alias. |
@@ -188,7 +188,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `schema_version` | `3` |
 | `brief_id`, `account_id`, `as_of` | The card's identity and planning date. |
 | `status` | `accepted` |
-| `rules_version` | `5`, the version of the rules the text was made under. |
+| `rules_version` | `6`, the version of the rules the text was made under. |
 | `sealed_by` | The `audit_id` of the seal. |
 | `sources` | `crm`: `demo_fixture` or `salesforce`. `calls`: `demo_fixture`, `imported_transcript` or `not_connected`. `slack`: `demo_fixture`, `slack` or `not_connected`. |
 | `text` | The card. |
@@ -218,33 +218,51 @@ Name a gap by its `code`, never by its text.
 
 A sentence ends at closing punctuation or at a blank line.
 
-- A single line break is a wrap, so a sentence written over two lines stays whole.
-- In a Slack message a line break also ends a sentence before each of these, which starts a block of
-  its own:
+- In a call note or a transcript a single line break is a wrap, so a sentence written over two lines
+  stays whole.
+- In a Slack message a line break ends a sentence. Slack wraps no text, so each line is one its
+  author ended, and two lines are never joined into a sentence nobody wrote. A line break is read as
+  a space only where the text settles that the sentence goes on: the next line starts with a
+  lower-case letter, or the line ends in a period that ends no sentence there, such as `Dr.`, as the
+  rules below decide for a space. Lines join only inside a run: lines that follow each other with no
+  blank line between, all in a block quote or none. What a line is decides how it is read:
   - a list item: after any spaces, `-`, `+`, `*`, `•`, `◦` or `▪`, or a number with `.` or `)`, then
-    any space;
+    any space. It starts a run, and its end is an end, so an item with no closing punctuation is
+    whole;
+  - a line of a code block, between the line that opens a ```` ``` ```` fence and the line that closes
+    it. It is one unit and is never split, and a line with no letter or digit, such as a brace, is
+    no unit;
+  - a line of a block quote, which starts with `>`. A line that holds only the marker is a blank
+    line. A code block inside a block quote is quoted too, and ends with the quote;
   - a speaker's turn: a line whose text up to its first colon names a known person of the card, a
     contact of the account or a listed seller, compared as a speaker label is compared for a role,
-    then a space and more, as in `Dana Ito: we can sign`. A label that names nobody known, such as
-    `Update:` or `Blocker:`, leaves the line the author's own;
-  - a block quote: a run of lines that start with `>` or `&gt;`;
-  - a code block, from the line that opens a ```` ``` ```` fence to the line that closes it. The line
-    after a block quote or a code block starts a new block too.
+    then a space and more, as in `Dana Ito: we can sign`. It starts a run, and the lines under it,
+    up to a blank line, a list item, a block quote or a code block, are that person's words too. A
+    label that names nobody known, such as `Update:` or `Blocker:`, leaves the line the author's own.
+
+  The quote marker and the fences are markup, not words, and are no part of a sentence's text. Slack
+  stores the `&`, `<` and `>` an author typed as `&amp;`, `&lt;` and `&gt;`, and the card reads each
+  back once before it neutralizes the text, so `Pelham &amp; Oster` is shown as `Pelham & Oster` and
+  a link or a mention typed by hand is replaced as Slack's own is.
 
   The sentences of a block quote or of a speaker's turn are marked `quoted`: the author relayed someone
   else's words, so the author's role is not theirs. The card shows them under no established role, as
   quoted by the message's author, and a speaker's turn keeps its label in the text, so the reader sees
   whose words they are.
-- A line that ends in closing punctuation ends its sentence there as anywhere else.
-- In a call note or a Slack message, a sentence without closing punctuation that more of the record
-  follows is not whole. It is counted as `cut` and never shown as a quotation. The end of the record
-  is an end, so a one-line message with no punctuation is whole.
+- In a call note or a Slack message, a sentence that more of the record follows is not whole when it
+  has no closing punctuation or ends on a short form that never ends a sentence, such as `Dr.`. It is
+  counted as `cut` and never shown as a quotation. The end of the record is an end, so a one-line
+  message with no punctuation is whole, and so is a list item or a line of code in a Slack message.
 - A period after a title, a legal or state short form, a list marker, or a dotted short form such as
   "e.g." does not end a sentence, so "28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one
   piece.
-- A firm suffix or a capitalized initialism ("LLP.", "U.S.A.") ends a sentence only before a word
-  that opens one, such as "We" or "The".
+- A firm suffix, a capitalized initialism ("LLP.", "U.S.A.") or a month or a day written short
+  ("Feb.", "Fri.") ends a sentence only before a word that opens one, such as "We" or "The".
+- "no." in lower case goes on only before a number or `#`, as in "invoice no. 14", so "that is a no."
+  ends its sentence.
 - Closing punctuation followed by a lower-case letter does not end a sentence.
+- Closing punctuation inside a bracket or a pair of curly quotation marks that opens in the sentence
+  and closes within 200 characters does not end it, so a quotation of two sentences stays one.
 
 Where the text does not settle it, two sentences stay joined, so a fragment is never shown as a
 sentence.
@@ -446,7 +464,8 @@ listed below with inert words.
 - A Slack mention becomes `[mention channel]`, `[mention here]`, `[mention everyone]` or
   `[mention group]`, `[user U123]` or `[channel C123]`.
 - A link of any scheme (`scheme://`), a `mailto:` address, a `//host` address or a `www.` address
-  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`. The host
+  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`. A Slack
+  link whose label repeats its target, or the address after `mailto:`, shows the marker alone. The host
   is shown without a leading `www.`, which a browser keeps: `https://www.files.example/` shows
   `[link files.example]`.
 - In the text a quotation is made from, a bare mail address such as `dana@files.example`, which a
@@ -468,7 +487,9 @@ listed below with inert words.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 
 Letters in any script are kept. Text is put in Unicode NFC form, a tab becomes a space, and every
-kind of line break becomes one line feed. A quotation is exact against the neutralized text, and
+kind of line break becomes one line feed. A sentence is neutralized once more as it stands on the
+card, since its first words may read as markup once they open a line. A quotation is exact against
+the neutralized text, with each run of spaces and each line break inside it as one space, and
 `inspect` gives the SHA-256 of the record's stored text. The account name in the heading is a quoted
 literal on one line. The last `NOT READ` line counts what was replaced, such as
 `Neutralized in source text: 1 mention, 1 link.`

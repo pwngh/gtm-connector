@@ -316,7 +316,11 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 		// characters, spaces apart.
 		texts, ends, total := make([]string, len(r.pieces)), make([]int, len(r.pieces)), 0
 		for i, piece := range r.pieces {
-			texts[i] = c.quotation(piece.raw)
+			raw := piece.raw
+			if text, isText := raw.(string); isText && table == "messages" {
+				raw = slackText(text)
+			}
+			texts[i] = c.quotation(raw)
 			total += nonSpace(texts[i])
 			ends[i] = total
 		}
@@ -325,7 +329,7 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 		if table == "messages" {
 			known = c.known
 		}
-		found, quotedAt, err := sentences(safe, table == "messages", known)
+		found, quotedAt, closedAt, err := sentences(safe, table == "messages", known)
 		if err != nil {
 			panic(invalid)
 		}
@@ -350,8 +354,9 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 				cut = !ended
 			}
 			// In a note or a message, a sentence without its end that more text follows is a fragment. It
-			// is not whole, and what follows it is read on its own.
-			fragment := !transcript && !ended && position < len(found)-1
+			// is not whole, and what follows it is read on its own. A list item or a line of code in a
+			// message is whole as written.
+			fragment := !transcript && position < len(found)-1 && !closedAt[position] && (!ended || unfinished(sentence))
 			partial := follows || cut || fragment
 			follows = cut
 			// A block quote or a speaker's turn in a message is someone else's words, which the author
@@ -361,6 +366,9 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 				spokenBy = role{role: "unknown", basis: QuotedBasis}
 			}
 			reached, size = reached+size, nonSpace(sentence)
+			// A sentence stands alone on the card, where its first words may read as markup they were not
+			// inside their line, so it is neutralized once more as it stands.
+			sentence = c.quotation(sentence)
 			from := bisect(ends, reached, true)
 			if from == len(ends) {
 				panic(invalid)
