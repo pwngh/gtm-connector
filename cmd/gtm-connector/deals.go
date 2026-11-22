@@ -535,15 +535,108 @@ func (d dealRegistry) RegisterDeal(ctx context.Context, p authz.Principal, accou
 	return deal, err
 }
 
+// RefreshDeal reads every source of an open deal again as the person and publishes a new card for it, as brief
+// does for the owner: each read and the seal name the person. Their grant on the deal's account is checked
+// before any source is opened, before each read and as the card is published, and the card is that deal's
+// or is not published. A deal that is unknown, or of an account the person holds no live grant on, is refused
+// alike, each under a get_account receipt finished as error/403 that reads nothing; the receipt of an unknown
+// deal names no account.
+func (d dealRegistry) RefreshDeal(ctx context.Context, p authz.Principal, ref string) error {
+	workspace, err := d.store.WorkspaceByID(ctx, p.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	refuse := func(asked, account string) error {
+		if err := refuseRead(ctx, d.store, workspace, p.ID, account, strictjson.NewObject("deal", asked)); err != nil {
+			return err
+		}
+		return authz.ErrNotPermitted
+	}
+	if !dealID.MatchString(ref) {
+		// What is no deal ID is not kept as it was sent.
+		return refuse("<invalid>", "")
+	}
+	deal, err := d.store.Deal(ctx, workspace.ID, ref)
+	if errors.Is(err, postgres.ErrNotFound) {
+		return refuse(ref, "")
+	} else if err != nil {
+		return err
+	}
+	live := func(ctx context.Context) (bool, error) {
+		return d.store.HasAccountGrant(ctx, workspace.ID, p.ID, deal.AccountRef)
+	}
+	switch granted, err := live(ctx); {
+	case err != nil:
+		return err
+	case !granted:
+		return refuse(ref, deal.AccountRef)
+	case deal.State != "open":
+		return httptransport.ErrDealClosed
+	}
+	from, err := workspaceReads(ctx, d.store, workspace)
+	if errors.Is(err, errNotConnected) {
+		return fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
+	} else if err != nil {
+		return err
+	}
+	// A person signed in to the browser reads every source of an account they hold a grant on. A grant that
+	// cannot be read is not a grant that ended: the read stops, and the failure is the store's.
+	scopes := []string{"crm:read", "calls:read", "slack:read"}
+	var unread error
+	err = from.open(ctx, "crm", "calls", "slack")
+	if err == nil {
+		_, err = from.publish(ctx, cards.Principal{WorkspaceID: workspace.ID, PrincipalID: p.ID,
+			TokenID: receipts.Fingerprint(randomToken()), Scopes: scopes,
+			Verify: func() ([]string, bool) {
+				granted, err := live(ctx)
+				if err != nil {
+					unread = err
+				}
+				return scopes, err == nil && granted
+			}}, deal.AccountRef, from.day(), deal.Ref)
+	}
+	var (
+		read     *cards.ReadError
+		told     *cards.Diagnostic
+		rejected *evidence.Rejected
+		unported *unportedSource
+	)
+	switch {
+	case unread != nil:
+		return unread
+	case err == nil, errors.Is(err, receipts.ErrSourceChanged), errors.Is(err, postgres.ErrDealChanged):
+		return err
+	case errors.Is(err, cards.ErrInvalidToken), errors.Is(err, receipts.ErrNotPermitted):
+		// The grant ended while the card was read, or as it was published.
+		return authz.ErrNotPermitted
+	case errors.As(err, &rejected), errors.Is(err, cards.ErrEvidenceInvalid), errors.Is(err, cards.ErrRejected):
+		return fmt.Errorf("%w: %w", httptransport.ErrNoCard, err)
+	case errors.As(err, &unported):
+		return fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
+	case errors.As(err, &read), errors.As(err, &told), errors.Is(err, cards.ErrBriefing),
+		errors.Is(err, cards.ErrSourceFailed):
+		return fmt.Errorf("%w: %w", httptransport.ErrSourceFailed, err)
+	}
+	return err
+}
+
 // refuseRegistration writes the receipt of a registration refused before any source was opened: the
 // get_account read it would have made, refused as error/403, naming no connection.
 func refuseRegistration(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, principal,
 	account string) error {
+	return refuseRead(ctx, store, workspace, principal, account, strictjson.NewObject("account_id", account))
+}
+
+// refuseRead writes the receipt of a deal request refused before any source was opened: the get_account read
+// it would have made, with these arguments, refused as error/403, naming no connection. account is "" when
+// the request named no account the workspace holds.
+func refuseRead(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, principal, account string,
+	arguments *strictjson.Object) error {
 	log := &postgres.ReceiptStore{Store: store}
 	run := "deal-" + strings.ReplaceAll(receipts.RandomID(), "-", "")
 	started, err := log.Start(ctx, receipts.Start{WorkspaceID: workspace.ID, OperationID: run + "/1",
 		PrincipalID: principal, TokenID: receipts.Fingerprint(randomToken()), Tool: "get_account",
-		Scope: "crm:read", AccountRef: account, Arguments: strictjson.NewObject("account_id", account), RequestID: receipts.RPC(1),
+		Scope: "crm:read", AccountRef: account, Arguments: arguments, RequestID: receipts.RPC(1),
 		BriefID: &run})
 	if err != nil {
 		return err

@@ -84,7 +84,7 @@ not published during, and a restore checks the same.
 | `GET /v1/deals` | Lists the deals you may read, with their colour. `?status=needs_attention` keeps the flagged ones. | Served, without the colour or the filter |
 | `POST /v1/deals` | Registers a deal and binds its IDs | Served, for an account of the CRM |
 | `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed | Served, without what changed |
-| `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand | Not built |
+| `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand | Served |
 | `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt | Not built |
 | `GET /v1/matches` | Lists the matches waiting for a person ([matches](#matches)) | Served |
 | `POST /v1/matches/{id}` | Decides one match: onto one deal of its account, or onto none | Served |
@@ -105,7 +105,8 @@ leaves it out.
 | --- | --- |
 | `GET /v1/deals` | `{"deals": [DEAL, ...]}`, the open deals first, each group by ID |
 | `POST /v1/deals` with `{"account": "acc-003"}` | `201` and `{"deal": DEAL}` |
-| `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` has made one. `matches` are the matches of the calls and threads that card read. |
+| `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` or a refresh has made one. `matches` are the matches of the calls and threads that card read. |
+| `POST /v1/deals/{id}/refresh`, with no body | `200` and the deal as `GET /v1/deals/{id}` gives it then: with the card this refresh published, unless another refresh finished after it |
 
 ```json
 {"id": "thornfield-2027-2e3hke", "account": "acc-003", "account_name": "Thornfield Wren LLP",
@@ -134,6 +135,25 @@ and the answer is `403 not_permitted`. With no CRM connected the answer is
 | `409 crm_not_connected` | The workspace has no CRM the server can read; nothing was read or written |
 | `409 source_changed` | The CRM was connected again while it was read |
 | `502 source_failed` | The CRM read failed, or did not return the account; its receipt says why |
+
+`POST /v1/deals/{id}/refresh` makes the deal's card again, as `brief` does, as the signed-in person:
+it reads the CRM, and the account's call and thread when they are matched to the deal, and publishes a
+new card that belongs to the deal. Each read and the seal name the person. The grant on the deal's
+account is checked before any source is opened, before each read and as the card is published. The
+card is that deal's or is not published: when the deal closes while it is read, nothing is published,
+also when the account's next deal is open by then. The cards before it stay. A refresh that publishes
+no card leaves the deal's last card as its newest. The answer is read after the card is published, so
+an answer that fails then, as for a grant revoked in between, does not undo the card.
+
+| Refusal | When |
+| --- | --- |
+| `403 not_permitted` | The deal is unknown, or of an account the person holds no live grant on. Either way the refusal has a receipt: the `get_account` read it would have made, refused as error/403 with no rows, which names the account only for a known deal. A grant that ends while the card is read stops the refresh too: the read that comes next is finished as error/401, and no card is published. |
+| `409 deal_closed` | The deal is closed. It keeps its cards and gets no new one. |
+| `409 crm_not_connected` | The workspace has no CRM the server can read |
+| `409 source_changed` | A source was connected again while it was read |
+| `409 deal_changed` | The deal, or a match of its call or thread, changed while the card was read |
+| `422 evidence_refused` | The evidence failed a check, so no card was made |
+| `502 source_failed` | A read failed; its receipt says why |
 
 ## Matches
 

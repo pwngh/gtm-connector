@@ -22,14 +22,27 @@ var (
 	// ErrNoCRM is a registration in a workspace with no CRM this server can read. Nothing was read, so no
 	// receipt was written.
 	ErrNoCRM = errors.New("no CRM is connected")
+	// ErrDealClosed is a refresh of a closed deal, which keeps its cards and gets no new one.
+	ErrDealClosed = errors.New("the deal is closed")
+	// ErrNoCard is a refresh whose evidence failed a check, so no card was made. The deal's last card stays.
+	ErrNoCard = errors.New("the evidence failed a check")
 )
 
 // DealRegistry registers a deal for a signed-in principal: it reads the account and its opportunities
 // through the workspace's CRM, each under a receipt that names the principal, and saves the deal. A
 // principal without a live grant on the account gets authz.ErrNotPermitted, and a workspace with no CRM it
 // can read gets ErrNoCRM.
+//
+// RefreshDeal reads every source of an open deal again as the principal and publishes a new card for it:
+// each read and the seal name the principal, whose grant on the deal's account is checked before any source
+// is opened, before each read and as the card is published. An unknown deal, or one of an account the
+// principal holds no live grant on, gets authz.ErrNotPermitted; a closed deal ErrDealClosed; a source that
+// was connected again during the read receipts.ErrSourceChanged; a deal or match that changed during it
+// postgres.ErrDealChanged; a failed read ErrSourceFailed; and evidence that fails a check ErrNoCard. None
+// of those publishes a card.
 type DealRegistry interface {
 	RegisterDeal(ctx context.Context, p authz.Principal, account string) (postgres.Deal, error)
+	RefreshDeal(ctx context.Context, p authz.Principal, deal string) error
 }
 
 type dealView struct {
@@ -126,6 +139,42 @@ func (s *Server) deal(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deal": view, "card": card, "matches": read})
+}
+
+// refreshDeal reads an open deal's sources again and answers the deal as GET gives it, with its new card. It
+// is a write, admitted by the session's CSRF token, and takes no body.
+func (s *Server) refreshDeal(w http.ResponseWriter, r *http.Request, admitted admission) {
+	if s.cfg.Deals == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Deals are not registered here.")
+		return
+	}
+	p := authz.Principal{WorkspaceID: admitted.principal.WorkspaceID, ID: admitted.principal.ID}
+	err := s.cfg.Deals.RefreshDeal(r.Context(), p, r.PathValue("deal"))
+	switch {
+	case errors.Is(err, authz.ErrNotPermitted):
+		writeError(w, http.StatusForbidden, "not_permitted", "Not permitted.")
+	case errors.Is(err, ErrDealClosed):
+		writeError(w, http.StatusConflict, "deal_closed", "This deal is closed. It keeps its cards and gets no new one.")
+	case errors.Is(err, receipts.ErrSourceChanged):
+		writeError(w, http.StatusConflict, "source_changed",
+			"A source was connected again while it was read. No card was published; send the request again.")
+	case errors.Is(err, postgres.ErrDealChanged):
+		writeError(w, http.StatusConflict, "deal_changed",
+			"The deal or its matches changed while the card was read. No card was published; send the request again.")
+	case errors.Is(err, ErrNoCRM):
+		writeError(w, http.StatusConflict, "crm_not_connected",
+			"This workspace has no CRM the server can read. No card was published.")
+	case errors.Is(err, ErrSourceFailed):
+		writeError(w, http.StatusBadGateway, "source_failed",
+			"A read failed. No card was published, and the deal's last card stays; the read's receipt says why.")
+	case errors.Is(err, ErrNoCard):
+		writeError(w, http.StatusUnprocessableEntity, "evidence_refused",
+			"The evidence failed a check. No card was published, and the deal's last card stays.")
+	case err != nil:
+		internal(w)
+	default:
+		s.deal(w, r, p)
+	}
 }
 
 type registerRequest struct {

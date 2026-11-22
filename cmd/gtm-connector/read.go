@@ -370,24 +370,8 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	if err := from.list(ctx, account); err != nil {
 		return nil, err
 	}
-	// The card belongs to the deal open for the account when it is published, found in its publication. A
-	// card of an account with none is the account's own. The account's calls and threads are matched first,
-	// and the card reads only those matched to the deal open now.
-	from.gate = &matchGate{store: r.store, workspace: r.workspace.ID}
-	if deal, open, err := r.store.OpenDeal(ctx, r.workspace.ID, account); err != nil {
-		return nil, err
-	} else if open {
-		if _, err := r.store.MatchAccount(ctx, r.workspace.ID, account); err != nil {
-			return nil, err
-		}
-		from.gate.read.Ref = deal.Ref
-	}
-	maker := from.maker()
-	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: &from.gate.read}
-	sealed, err := maker.Brief(ctx, cards.Brief{
-		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
-			Scopes: scopes},
-		OperationID: "brief-" + receipts.RandomID(), AccountID: account, AsOf: asOf, IncludeSlack: true})
+	sealed, err := from.publish(ctx, cards.Principal{WorkspaceID: r.workspace.ID,
+		TokenID: receipts.Fingerprint(randomToken()), Scopes: scopes}, account, asOf, "")
 	if err != nil {
 		return nil, err
 	}
@@ -403,6 +387,33 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	card := value.(*strictjson.Object)
 	card.Delete("evidence")
 	return card, nil
+}
+
+// publish reads one account's sources for the principal and publishes its card. The card belongs to the deal
+// open for the account when it is published, found in its publication, and a card of an account with none
+// is the account's own. The account's calls and threads are matched first, and the card reads only those
+// matched to the deal open now. With only, the card is that deal's or is not made: when the account's open
+// deal is another one, or none, now or as the card is published, nothing is published and the error is
+// postgres.ErrDealChanged.
+func (r *reads) publish(ctx context.Context, principal cards.Principal, account, asOf, only string) (*cards.Sealed, error) {
+	r.gate = &matchGate{store: r.store, workspace: r.workspace.ID}
+	r.gate.read.Required = only != ""
+	deal, open, err := r.store.OpenDeal(ctx, r.workspace.ID, account)
+	switch {
+	case err != nil:
+		return nil, err
+	case only != "" && (!open || deal.Ref != only):
+		return nil, postgres.ErrDealChanged
+	case open:
+		if _, err := r.store.MatchAccount(ctx, r.workspace.ID, account); err != nil {
+			return nil, err
+		}
+		r.gate.read.Ref = deal.Ref
+	}
+	maker := r.maker()
+	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: &r.gate.read}
+	return maker.Brief(ctx, cards.Brief{Principal: principal, OperationID: "brief-" + receipts.RandomID(),
+		AccountID: account, AsOf: asOf, IncludeSlack: true})
 }
 
 var (
