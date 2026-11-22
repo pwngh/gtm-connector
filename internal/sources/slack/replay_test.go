@@ -69,16 +69,18 @@ func (u *upstream) RoundTrip(request *http.Request) (*http.Response, error) {
 }
 
 // TestRecordedThreadsReplay reads every thread the card fixtures record through the reader, offline. The
-// requests are the ones the Python reader made, in its order, and the messages and the snapshot are the
+// requests are the ones the recorded read made, in its order, and the messages and the snapshot are the
 // ones the row's "read" holds, which the card tests serve as the thread: digests and response byte counts
-// included.
+// included. With -update, a row's "read" is written again from what the reader gives now; the card tests
+// then make its card from that read, so this package runs before theirs.
 func TestRecordedThreadsReplay(t *testing.T) {
 	// The recorder's reader clock stood at 2027-01-16T00:00:00Z, and its sign-in did not rotate.
 	wall := time.Date(2027, 1, 16, 0, 0, 0, 0, time.UTC)
 	bound := binding(t, testIdentity)
 	threads, exchanges, unmapped := 0, 0, 0
 	for family, rowsKey := range map[string]string{"books_slack": "thread", "slack_threads": "rows"} {
-		for number, line := range oracletest.Lines(t, "cards/"+family+".jsonl.gz") {
+		golden := oracletest.NewGolden(t, "cards/"+family+".jsonl.gz", strictjson.Canonical.Dumps)
+		for number, line := range golden.Lines() {
 			row := parse(t, string(line))
 			key := fmt.Sprintf("%s %s", family, member(t, row, "key"))
 			accountID := member(t, row, "account_id").(string)
@@ -120,13 +122,21 @@ func TestRecordedThreadsReplay(t *testing.T) {
 				t.Errorf("%s: %v", key, err)
 				continue
 			}
-			if got, want := dump(t, read.Snapshot), dump(t, snapshot); got != want {
-				t.Errorf("%s: snapshot\n got %s\nwant %s", key, got, want)
-			}
 			want := member(t, recorded, "messages").([]any)
 			got := make([]any, len(read.Records))
 			for i, record := range withRefs(read.Records, "messages") {
 				got[i] = record
+			}
+			if oracletest.Update() {
+				renewed := strictjson.Clone(row).(*strictjson.Object)
+				again := member(t, renewed, "input", "read").(*strictjson.Object)
+				again.Set("snapshot", read.Snapshot)
+				again.Set("messages", got)
+				golden.Set(number, row, renewed)
+				snapshot, want = read.Snapshot, got
+			}
+			if got, want := dump(t, read.Snapshot), dump(t, snapshot); got != want {
+				t.Errorf("%s: snapshot\n got %s\nwant %s", key, got, want)
 			}
 			if got, want := dump(t, got), dump(t, want); got != want {
 				t.Errorf("%s: records\n got %s\nwant %s", key, got, want)

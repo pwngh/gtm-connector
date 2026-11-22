@@ -116,9 +116,9 @@ record and its receipt, neutralizing again changes nothing, no sentence holds a 
 mail address or a code fence or is given to the wrong side, and a second build gives the same bytes.
 The ten invented cases in `testdata/oracle/cards/cases.jsonl.gz` stay byte for byte. Character
 classes come from `internal/unicodetab`, never Go's or RE2's. A deliberate change to the card or
-text rules rewrites the golden files it changes with `go test -p 1 -v ./internal/cards
-./internal/evidence ./internal/realdata ./internal/render/... ./internal/oracletest
-./cmd/gtm-connector -update` (never with `-run`; it prints what changed in each card family,
+text rules, or to what the Slack reader gives, rewrites the golden files it changes with `go test
+-p 1 -v ./internal/sources/slack ./internal/cards ./internal/evidence ./internal/realdata
+./internal/render/... ./internal/oracletest ./cmd/gtm-connector -update` (never with `-run`; it prints what changed in each card family,
 refuses a card that fails its own seal checks, and names any card the golden sample must add to
 show every feature a card shows), with `GTM_TEST_DATABASE_URL` set for the command replay, and the
 real-data digests of the changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`.
