@@ -323,7 +323,8 @@ While the account has an open [deal](api.md#one-deal-one-id), the brief is made 
 account's call and thread are matched first, the brief reads them only when they are matched to the
 deal, and it is bound to the deal as it is saved. It is then the deal's newest card, which
 `read_deal_card` gives, until `brief`, a refresh or another prepared brief makes a newer one. A brief
-whose deal closes while it is read is not saved.
+whose deal closes while it is read is not saved. A prepared brief closes no deal: one that reads the
+deal's opportunity as closed leaves the deal open until `brief` or a refresh reads it.
 
 A read the token has no scope for is receipted as refused, with HTTP 403, and the card says so: a token
 without `calls:read` gets a card whose `NOT READ` section says `Calls: not read. The grant lacks

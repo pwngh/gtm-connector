@@ -78,8 +78,8 @@ from a static host, it says only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 
 One development Salesforce org, read-only, and one development Slack workspace have been read, both on
-invented records, on 2026-11-21. No sandbox, no production org and no real identity provider has been
-verified. v0.1.0 did not wait for one.
+invented records, on 2026-11-21. The sign-in was run by hand against Dex on one machine on 2026-11-22.
+No sandbox, no production org and no hosted identity provider has been verified. v0.1.0 did not wait for one.
 
 ## Not built yet, in order
 
@@ -91,7 +91,8 @@ One rep reads one real renewal before a call.
 
 Started: a deal is registered by hand with `deal new` or `POST /v1/deals`, read with `deal list`,
 `deal show`, `GET /v1/deals` and `GET /v1/deals/{id}`, and closed with `deal close`, with a reason, a
-receipt and a final card, after which it leaves `deal list`, and `brief` makes
+receipt and a final card, or by the CRM's closed stage as a card reads it, after which it leaves
+`deal list`, and `brief` makes
 an account's card for its open deal ([one deal, one ID](api.md#one-deal-one-id)). People sign in through
 the company's identity provider and read the accounts `grant` gives them
 ([running it](operations.md#sign-in-through-your-identity-provider)). An imported call and a mapped thread
@@ -99,12 +100,12 @@ are matched to a deal of their account by time, and one that fits two deals wait
 ([setting it up](config.md#what-is-built-today)). What is left:
 
 - The proof route of a deal ([deal routes](api.md#deal-routes)), and on the served routes the deal list's colour, `?status=needs_attention` and what changed. A deal that binds IDs of other tools than the CRM ([one deal, one ID](api.md#one-deal-one-id)), and `deal DEAL_ID` printing the card as [working a deal](deals.md) shows.
-- A live check of the sign-in against a real identity provider. The sign-in is built, and has run against an invented provider only.
+- A live check of the sign-in against a hosted identity provider, such as Google Workspace, Microsoft Entra ID or Okta. The sign-in is built, and has run against the invented provider of its tests and, by hand, against Dex on one machine.
 - Calls and Slack threads discovered by email, domain and channel, with one that fits deals of two accounts on neither card and both cards saying so ([setting it up](config.md#how-a-deal-gets-its-evidence)). `approval: all`, which holds every match for a person, also per source.
 - A call or thread that waits for a person, one a person rejected and one matched to another deal each saying so on the card in its own words.
 - The Deals page naming a deal by its deal ID, with the list in order of urgency and in its colours. Today the page lists accounts by name at `/deals/{account}`, with the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
-- Close by the CRM's closed stage, when that comes before a person closes the deal, and a close by a signed-in person through the API. Today the owner closes a deal with `deal close`. The list of the API and of `list_deals` still gives closed deals, after the open ones.
+- A close by a signed-in person through the API. Today the owner closes a deal with `deal close`, and the connector closes one when a card of `brief`, a refresh or `deal close` reads its opportunity as closed in the CRM; a brief an assistant prepares closes none, and nothing reads the CRM on a schedule yet. The list of the API and of `list_deals` still gives closed deals, after the open ones.
 - Every call of a deal, whole. Today a card reads at most one imported excerpt per account, and a deal's card only when the excerpt is matched to that deal: up to 20 lines or cues unless a range is given, and at most 256 with the lines or cues beside them ([call transcripts](sources.md#how-a-file-is-read)).
 - On Salesforce, the still-open and close-date signals counted against a contract that has ended ([signals](cards.md#signals)).
 - A receipt when a card fails its seal.

@@ -469,6 +469,31 @@ func Read(t testing.TB, f *Fixture, tool, account, principal string, records ...
 	return finished
 }
 
+// PublishReading publishes a card of account as Publish does, which also rests on a second read: one of
+// tool, which returned the records. No line of the card cites them.
+func PublishReading(t testing.TB, f *Fixture, tool, account, principal, brief string, records ...postgres.RecordVersion) Published {
+	t.Helper()
+	ctx := context.Background()
+	must(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, account, "Invented account "+account))
+	must(t, f.Store.GrantAccount(ctx, f.Workspace.ID, principal, account))
+	record := Record("accounts", account, "id", account, "name", "Invented account "+account)
+	pub, call, read := PreparedFor(t, f.Store, f, account, brief+"-call", brief, principal, postgres.TokenID(""), record)
+	arguments, _ := json.Marshal(map[string]string{"account_id": account})
+	second, _, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: call.ID, Ordinal: 2,
+		Tool: tool, Scope: "crm:read", ConnectionID: f.Connection.ID, BriefID: brief,
+		Arguments: arguments, Lease: time.Minute,
+	}, func(context.Context) ([]postgres.RecordVersion, error) { return records, nil })
+	must(t, err)
+	pub.ReadReceiptIDs = []string{read.ID, second.ID}
+	pub.Bytes = CardBytes(t, call, account, brief, []postgres.Receipt{read, second},
+		append([]postgres.RecordVersion{record}, records...), pub.Units, pub.Gaps)
+	card, err := f.Store.PublishCard(ctx, pub)
+	must(t, err)
+	seal, err := f.Store.Receipt(ctx, f.Workspace.ID, call.ID)
+	must(t, err)
+	return Published{card, seal, second}
+}
+
 // RegisterDeal registers an open deal of account, named from word and 2027, by principal ("" for the
 // owner), binding the account and the opportunity opp-1 that its two reads returned.
 func RegisterDeal(t testing.TB, f *Fixture, account, principal, word string) postgres.Deal {

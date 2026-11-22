@@ -302,13 +302,29 @@ func (r *run) closeDeal(ctx context.Context) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if from.stage != "" {
+			// The CRM's closed stage came first: the deal closed on the card just made, and the reason given
+			// here is not recorded.
+			closed, err := r.store.Deal(ctx, r.workspace.ID, deal.Ref)
+			if err != nil {
+				return nil, err
+			}
+			r.announce("Final card: " + sealed.BriefID + ".")
+			r.announce("The CRM holds the deal's opportunity as closed, " + from.stage + ", so the deal closed on " +
+				"that as the card was made. The reason given was not recorded.")
+			return dealValue(closed)
+		}
 		card, err := r.store.CardByBrief(ctx, r.workspace.ID, sealed.BriefID)
 		if err != nil {
 			return nil, err
 		}
 		closing.Card, brief = card.ID, sealed.BriefID
 	}
-	deal, _, err = r.store.CloseDeal(ctx, closing)
+	deal, changed, err := r.store.CloseDeal(ctx, closing)
+	if changed && err != nil {
+		// The close committed, and reading the deal back failed: read it again.
+		deal, err = r.store.Deal(ctx, r.workspace.ID, closing.Ref)
+	}
 	switch {
 	case errors.Is(err, postgres.ErrDealChanged) && brief != "":
 		return nil, &failure{code: 3, message: "The deal got a newer card, or closed, while this ran, so this " +
@@ -510,8 +526,8 @@ func dealValue(d postgres.Deal) (*strictjson.Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		how = strictjson.NewObject("basis", d.Close.Basis, "reason", orNull(reason), "closed_by", orNull(d.Close.By),
-			"receipt", orNull(d.Close.ReceiptID), "final_card", orNull(d.Close.FinalCard))
+		how = strictjson.NewObject("basis", d.Close.Basis, "reason", orNull(reason), "outcome", orNull(d.Close.Outcome),
+			"closed_by", orNull(d.Close.By), "receipt", orNull(d.Close.ReceiptID), "final_card", orNull(d.Close.FinalCard))
 	}
 	if d.LatestCard != nil {
 		card = strictjson.NewObject("id", d.LatestCard.ID, "brief_id", d.LatestCard.BriefID,
@@ -559,6 +575,9 @@ func (r *run) dealText(action string, result any) string {
 		fields = append(fields, []any{"Closed", get(deal, "closed_at")})
 		if reason, _ := get(how, "reason").(string); reason != "" {
 			fields = append(fields, []any{"Reason", strictjson.Quote(reason)})
+		}
+		if outcome, _ := get(how, "outcome").(string); outcome != "" {
+			fields = append(fields, []any{"Closed by", "the CRM's stage, " + outcome})
 		}
 		if receipt, _ := get(how, "receipt").(string); receipt != "" {
 			fields = append(fields, []any{"Close receipt", receipt}, []any{"Final card", orNone(get(how, "final_card"))})

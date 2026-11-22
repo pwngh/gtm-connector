@@ -48,10 +48,14 @@ type Deal struct {
 
 // DealClosed is the record of a deal's close.
 type DealClosed struct {
-	// Basis is person, or unrecorded for a deal closed before closes were recorded, which has nothing else.
+	// Basis is person; crm_stage for a deal the connector closed when a card read its opportunity as closed;
+	// or unrecorded for a deal closed before closes were recorded, which has nothing else.
 	Basis string
-	// Reason is the person's reason: their own words, neutralized before they are shown.
+	// Reason is the person's reason: their own words, neutralized before they are shown. A crm_stage close
+	// has none.
 	Reason string
+	// Outcome is won or lost for a crm_stage close, and "" otherwise.
+	Outcome string
 	// By is the principal that closed the deal, or "" for the owner.
 	By string
 	// ReceiptID is the close_deal receipt.
@@ -71,6 +75,9 @@ type DealClose struct {
 	// Card is the card this close made as the deal's final card, or "" for a close that made none. With it,
 	// the close is this close's or is refused: the deal must still be open, with that card its newest.
 	Card string
+	// Outcome, won or lost, makes this the connector's close on the CRM's closed stage: Card is the card that
+	// read the deal's opportunity as closed, and the close has no reason and no principal.
+	Outcome string
 }
 
 // DealCard names one card of a deal.
@@ -130,7 +137,7 @@ const dealColumns = `d.workspace_id, d.ref, d.account_ref, a.display_name, coale
 	coalesce(d.contract_ref, ''), coalesce(to_char(d.renews_on, 'YYYY-MM-DD'), ''), d.state,
 	coalesce(d.registered_by::text, ''), d.account_read_id, d.opportunities_read_id, d.registered_at, d.closed_at,
 	coalesce(d.close_basis, ''), coalesce(d.close_reason, ''), coalesce(d.closed_by::text, ''),
-	coalesce(d.close_receipt_id::text, ''), coalesce(d.final_card_id::text, ''),
+	coalesce(d.close_receipt_id::text, ''), coalesce(d.final_card_id::text, ''), coalesce(d.close_outcome, ''),
 	l.id, l.brief_id, l.published_at`
 
 // dealFrom joins a deal to its account's name and to its newest card.
@@ -149,7 +156,7 @@ func scanDeal(row pgx.Row) (Deal, error) {
 	var closed DealClosed
 	err := row.Scan(&d.WorkspaceID, &d.Ref, &d.AccountRef, &d.AccountName, &d.OpportunityRef, &d.ContractRef,
 		&d.RenewsOn, &d.State, &d.RegisteredBy, &d.AccountReadID, &d.OpportunitiesReadID, &d.RegisteredAt,
-		&d.ClosedAt, &closed.Basis, &closed.Reason, &closed.By, &closed.ReceiptID, &closed.FinalCard,
+		&d.ClosedAt, &closed.Basis, &closed.Reason, &closed.By, &closed.ReceiptID, &closed.FinalCard, &closed.Outcome,
 		&cardID, &briefID, &published)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Deal{}, ErrNotFound
@@ -314,11 +321,16 @@ func CloseReason(text string) (string, error) {
 	return text, nil
 }
 
-// startClose commits the pending close_deal receipt of one close, naming the deal, the reason and the final
-// card. account is "" for a close that is refused before the deal is known to the caller.
-func (s *Store) startClose(ctx context.Context, in DealClose, account, finalCard string) (Receipt, error) {
-	encoded, err := json.Marshal(map[string]any{"deal": in.Ref, "basis": "person", "reason": in.Reason,
-		"final_card": nullable(finalCard)})
+// startClose commits the pending close_deal receipt of one close, naming the deal, the basis, the reason and
+// the final card, and for a close on the CRM's closed stage the opportunity and the outcome. account is ""
+// for a close that is refused before the deal is known to the caller.
+func (s *Store) startClose(ctx context.Context, in DealClose, account, finalCard, opportunity string) (Receipt, error) {
+	named := map[string]any{"deal": in.Ref, "basis": "person", "reason": nullable(in.Reason),
+		"final_card": nullable(finalCard)}
+	if in.Outcome != "" {
+		named["basis"], named["opportunity"], named["outcome"] = "crm_stage", nullable(opportunity), in.Outcome
+	}
+	encoded, err := json.Marshal(named)
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -330,7 +342,8 @@ func (s *Store) startClose(ctx context.Context, in DealClose, account, finalCard
 }
 
 // CloseDeal closes an open deal for a person or the owner, with their reason, and gives it with changed
-// true. The close gets a close_deal receipt, committed before the deal changes and finished ok in the
+// true. changed is true once the close has committed, also when reading the deal back then fails: the error
+// is then of that read, and the deal is closed. The close gets a close_deal receipt, committed before the deal changes and finished ok in the
 // transaction that closes it, which names the deal's final card: its newest card as it closes, or none. A
 // deal that is closed already is given as it is, with no receipt, unless the close names the card it made
 // (Card): then the close is its own or is refused, and a deal that is closed already, or whose newest card is
@@ -339,12 +352,21 @@ func (s *Store) startClose(ctx context.Context, in DealClose, account, finalCard
 // gets ErrNotPermitted under a receipt refused as error/403 that names no account, and ErrNotFound for the
 // owner. A deal that got a newer card, or closed, while this close ran gives ErrDealChanged under a receipt
 // finished as an error, and the deal is as that left it.
+//
+// With Outcome, the close is the connector's, on the CRM's closed stage: the card (Card) read the deal's
+// opportunity as closed, won or lost. It has no reason and names no principal, and its receipt names the
+// opportunity and the outcome. A deal that binds no opportunity gives ErrDealChanged.
 func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bool, err error) {
 	if !validUUID(in.WorkspaceID) || in.PrincipalID != "" && !validUUID(in.PrincipalID) {
 		return Deal{}, false, ErrNotPermitted
 	}
-	if in.Reason, err = CloseReason(in.Reason); err != nil {
-		return Deal{}, false, err
+	switch {
+	case in.Outcome == "":
+		if in.Reason, err = CloseReason(in.Reason); err != nil {
+			return Deal{}, false, err
+		}
+	case in.Outcome != "won" && in.Outcome != "lost", in.Reason != "", in.PrincipalID != "", in.Card == "":
+		return Deal{}, false, errors.New("a close on the CRM's stage has an outcome and a card, and no reason or person")
 	}
 	if in.Card != "" && !validUUID(in.Card) {
 		return Deal{}, false, ErrDealChanged
@@ -364,7 +386,7 @@ func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bo
 		if !dealRef.MatchString(in.Ref) {
 			in.Ref = "<invalid>"
 		}
-		refused, err := s.startClose(ctx, in, "", "")
+		refused, err := s.startClose(ctx, in, "", "", "")
 		if err != nil {
 			return Deal{}, false, err
 		}
@@ -383,9 +405,16 @@ func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bo
 	if final == "" && before.LatestCard != nil {
 		final = before.LatestCard.ID
 	}
-	receipt, err := s.startClose(ctx, in, before.AccountRef, final)
+	if in.Outcome != "" && before.OpportunityRef == "" {
+		return Deal{}, false, ErrDealChanged
+	}
+	receipt, err := s.startClose(ctx, in, before.AccountRef, final, before.OpportunityRef)
 	if err != nil {
 		return Deal{}, false, err
+	}
+	basis := "person"
+	if in.Outcome != "" {
+		basis = "crm_stage"
 	}
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		if err := s.at("close:started"); err != nil {
@@ -428,9 +457,10 @@ func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bo
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE deals SET state = 'closed', closed_at = clock_timestamp(),
-			close_basis = 'person', close_reason = $3, closed_by = $4, close_receipt_id = $5, final_card_id = $6
-			WHERE workspace_id = $1 AND ref = $2`, in.WorkspaceID, in.Ref, in.Reason, nullable(in.PrincipalID),
-			receipt.ID, nullable(final))
+			close_basis = $7, close_reason = $3, closed_by = $4, close_receipt_id = $5, final_card_id = $6,
+			close_outcome = $8
+			WHERE workspace_id = $1 AND ref = $2`, in.WorkspaceID, in.Ref, nullable(in.Reason), nullable(in.PrincipalID),
+			receipt.ID, nullable(final), basis, nullable(in.Outcome))
 		return err
 	})
 	if err != nil {
@@ -442,6 +472,10 @@ func (s *Store) CloseDeal(ctx context.Context, in DealClose) (d Deal, changed bo
 			status, code = 409, "deal_changed"
 		}
 		return Deal{}, false, errors.Join(err, s.failDecision(ctx, receipt, status, code))
+	}
+	// The close is committed: changed is true whatever the read that follows gives.
+	if err := s.at("close:committed"); err != nil {
+		return Deal{}, true, err
 	}
 	d, err = s.Deal(ctx, in.WorkspaceID, in.Ref)
 	return d, true, err

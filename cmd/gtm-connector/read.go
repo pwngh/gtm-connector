@@ -183,8 +183,12 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 		request  *cards.RequestError
 		rejected *evidence.Rejected
 		read     *cards.ReadError
+		stage    *stageCloseFailed
 	)
 	switch {
+	case errors.As(err, &stage):
+		return &failure{code: 1, message: "The card " + stage.brief + " was published and stays the deal's. It holds " +
+			"the deal's opportunity as closed in the CRM, and the deal could not be closed on that. Run the command again."}
 	case errors.As(err, &known):
 		return known
 	case errors.As(err, &told):
@@ -382,6 +386,10 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	} else if deal != "" {
 		r.announce("Deal: " + deal + ".")
 	}
+	if from.stage != "" {
+		r.announce("The CRM holds the deal's opportunity as closed, " + from.stage + ". The deal is closed, and " +
+			"this is its final card.")
+	}
 	value, err := strictjson.Loads(sealed.Payload)
 	if err != nil {
 		return nil, err
@@ -412,6 +420,11 @@ var errPreparedBrief = refused("This brief was prepared by an assistant with pre
 // matched to the deal open now. With only, the card is that deal's or is not made: when the account's open
 // deal is another one, or none, now or as the card is published, nothing is published and the error is
 // postgres.ErrDealChanged.
+//
+// A card that read its deal's opportunity as closed in the CRM is the deal's final card: the deal is closed on
+// it, for the connector, and r.stage says won or lost. A close that fails leaves the card published and the
+// deal open: publish then gives the card and a *stageCloseFailed, which names the card, and the next card
+// tries again.
 func (r *reads) publish(ctx context.Context, principal cards.Principal, account, asOf, only string) (*cards.Sealed, error) {
 	r.gate = &matchGate{store: r.store, workspace: r.workspace.ID}
 	r.gate.read.Required = only != ""
@@ -429,8 +442,89 @@ func (r *reads) publish(ctx context.Context, principal cards.Principal, account,
 	}
 	maker := r.maker()
 	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: &r.gate.read}
-	return maker.Brief(ctx, cards.Brief{Principal: principal, OperationID: "brief-" + receipts.RandomID(),
+	sealed, err := maker.Brief(ctx, cards.Brief{Principal: principal, OperationID: "brief-" + receipts.RandomID(),
 		AccountID: account, AsOf: asOf, IncludeSlack: true})
+	r.stage = ""
+	if err != nil || !open || deal.OpportunityRef == "" {
+		return sealed, err
+	}
+	if r.stage, err = r.closeOnStage(ctx, deal, sealed); err != nil {
+		return sealed, &stageCloseFailed{brief: sealed.BriefID, cause: err}
+	}
+	return sealed, nil
+}
+
+// stageCloseFailed is a card that was published and read its deal's opportunity as closed, whose deal could
+// not be closed on it. The card stays the deal's.
+type stageCloseFailed struct {
+	brief string
+	cause error
+}
+
+func (e *stageCloseFailed) Error() string {
+	return "the card " + e.brief + " was published, and its deal could not be closed on the CRM's closed stage: " +
+		e.cause.Error()
+}
+
+func (e *stageCloseFailed) Unwrap() error { return e.cause }
+
+// closeOnStage closes a deal on the card just published for it when the card's evidence holds the deal's
+// opportunity as closed, and says won or lost. An open opportunity, or one the card did not read, closes
+// nothing, and so does a card that was bound to no deal or to another, as when the deal closed while the card
+// was read. A deal that got a newer card or closed meanwhile is left: that card, or that close, stands.
+func (r *reads) closeOnStage(ctx context.Context, deal postgres.Deal, sealed *cards.Sealed) (string, error) {
+	bound, err := r.store.DealOfBrief(ctx, r.workspace.ID, sealed.BriefID)
+	if err != nil || bound != deal.Ref {
+		return "", err
+	}
+	payload, err := receipts.ParsePayload(sealed.Payload)
+	if err != nil {
+		return "", err
+	}
+	record, found := payload.Record("crm/opportunities/" + deal.OpportunityRef)
+	if !found {
+		return "", nil
+	}
+	outcome := stageOutcome(record)
+	if outcome == "" {
+		return "", nil
+	}
+	card, err := r.store.CardByBrief(ctx, r.workspace.ID, sealed.BriefID)
+	if err != nil {
+		return "", err
+	}
+	_, changed, err := r.store.CloseDeal(ctx, postgres.DealClose{WorkspaceID: r.workspace.ID, Ref: deal.Ref, Card: card.ID,
+		Outcome: outcome})
+	switch {
+	case changed:
+		// The close committed, whatever reading the deal back gave.
+		return outcome, nil
+	case errors.Is(err, postgres.ErrDealChanged):
+		return "", nil
+	}
+	return "", err
+}
+
+// stageOutcome is won or lost for an opportunity record the CRM holds as closed, and "" for an open one. A
+// CRM that says whether an opportunity is closed is taken at its word; one that gives a stage alone is closed
+// at closed_won or closed_lost.
+func stageOutcome(record *strictjson.Object) string {
+	if closed, says := get(record, "is_closed").(bool); says {
+		if !closed {
+			return ""
+		}
+		if won, _ := get(record, "is_won").(bool); won {
+			return "won"
+		}
+		return "lost"
+	}
+	switch get(record, "stage") {
+	case "closed_won":
+		return "won"
+	case "closed_lost":
+		return "lost"
+	}
+	return ""
 }
 
 var (

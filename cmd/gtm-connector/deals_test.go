@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -22,6 +23,7 @@ import (
 type dealClosed struct {
 	Basis     string  `json:"basis"`
 	Reason    *string `json:"reason"`
+	Outcome   *string `json:"outcome"`
 	ClosedBy  *string `json:"closed_by"`
 	Receipt   *string `json:"receipt"`
 	FinalCard *string `json:"final_card"`
@@ -992,5 +994,162 @@ func TestAClosedDealShowsItsCloseThroughTheRoutes(t *testing.T) {
 	o := signInAs(t, app, "demo-outsider", "outsider-password-0123456789-abcdef")
 	if reply := o.send(http.MethodGet, "/api/v1/receipts/"+*how.Receipt, nil, nil); reply.StatusCode != http.StatusForbidden {
 		t.Errorf("the close's receipt, for a person with no grant on the account: %d", reply.StatusCode)
+	}
+}
+
+// A deal closes when a card reads its opportunity as closed in the CRM: brief publishes the card, which is
+// the deal's final card, and the connector closes the deal on it under a close_deal receipt that names the
+// opportunity and the outcome, with no reason and no person. While the opportunity is open nothing closes.
+// deal close, when the CRM's stage comes first, closes on the stage and does not record its reason.
+func TestADealClosesWhenItsOpportunityClosesInTheCRM(t *testing.T) {
+	d := setUpDemo(t)
+	org, _, _ := inventedSalesforce(t)
+	where := []string{"--state-dir", "invented-books"}
+	with := func(tokens ...string) []string { return append(tokens, where...) }
+	if code, _, stderr := d.read(t, with("connect", "salesforce", "--org", salesforcetest.Alias, "--environment",
+		"production")...); code != 0 {
+		t.Fatalf("connect: %s", stderr)
+	}
+	book := func(n, stage string, closed, won bool) string {
+		rows, err := strictjson.LoadsText(fmt.Sprintf(`{"Account": [{"Id": "00100000000088%[1]sAAA", "Name": "Closing %[1]s",
+			"Industry": "Testing", "AccountNumber": null}], "Contact": [], "Contract": [], "Opportunity": [
+			{"Id": "00600000000088%[1]sAAA", "AccountId": "00100000000088%[1]sAAA", "Name": "Renewal", "StageName": "%[2]s",
+			 "Amount": {"decimal": "2500.00"}, "CloseDate": "2027-03-01", "IsClosed": %[3]t, "IsWon": %[4]t},
+			{"Id": "00600000000099%[1]sAAA", "AccountId": "00100000000088%[1]sAAA", "Name": "Last year", "StageName": "Closed Lost",
+			 "Amount": {"decimal": "900.00"}, "CloseDate": "2026-03-01", "IsClosed": true, "IsWon": false}]}`,
+			n, stage, closed, won))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return org.Add(rows.(*strictjson.Object))
+	}
+	closes := func() int { return d.count(t, "SELECT count(*) FROM receipts WHERE tool = 'close_deal'") }
+
+	// While the deal's opportunity is open, a card closes nothing, though it reads another of the account's
+	// opportunities as closed.
+	account := book("1", "Negotiation", false, false)
+	var deal dealResult
+	d.result(t, &deal, with("deal", "new", account, "--as-of", "2027-01-15")...)
+	if text(deal.Opportunity) != "opp-sf-006000000000881AAA" {
+		t.Fatalf("the deal binds %s", text(deal.Opportunity))
+	}
+	code, _, stderr := d.read(t, with("brief", account, "--as-of", "2027-01-15")...)
+	if code != 0 || !strings.HasSuffix(stderr, "Deal: "+deal.ID+".\n") || closes() != 0 {
+		t.Fatalf("brief while the opportunity is open: exit %d, %d closes\n%s", code, closes(), stderr)
+	}
+
+	// The opportunity closes, won. The next card is the deal's final card.
+	book("1", "Closed Won", true, true)
+	code, _, stderr = d.read(t, with("brief", account, "--as-of", "2027-01-15")...)
+	if code != 0 || !strings.HasSuffix(stderr, "Deal: "+deal.ID+".\nThe CRM holds the deal's opportunity as closed, won. "+
+		"The deal is closed, and this is its final card.\n") {
+		t.Fatalf("brief after the opportunity closed: exit %d\n%s", code, stderr)
+	}
+	var closed struct{ Deal dealResult }
+	d.result(t, &closed, with("deal", "show", deal.ID)...)
+	how := closed.Deal.Close
+	if closed.Deal.State != "closed" || how == nil || how.Basis != "crm_stage" || text(how.Outcome) != "won" ||
+		how.Reason != nil || how.ClosedBy != nil || how.Receipt == nil || closed.Deal.LatestCard == nil ||
+		text(how.FinalCard) != closed.Deal.LatestCard.ID {
+		t.Fatalf("the deal after its opportunity closed: %+v %+v", closed.Deal, how)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE id = $1 AND tool = 'close_deal' AND status = 'ok'
+		AND principal_id IS NULL AND account_ref = $2 AND arguments::jsonb = jsonb_build_object('deal', $3::text,
+		'basis', 'crm_stage', 'reason', null, 'final_card', $4::text, 'opportunity', 'opp-sf-006000000000881AAA',
+		'outcome', 'won')`, *how.Receipt, account, deal.ID, *how.FinalCard); n != 1 || closes() != 1 {
+		t.Errorf("the close's receipt: %d of %d name the deal, the opportunity, the outcome and the final card", n, closes())
+	}
+	if n := d.count(t, "SELECT count(*) FROM deal_cards WHERE deal_ref = $1", deal.ID); n != 2 {
+		t.Errorf("the deal has %d cards, of 2", n)
+	}
+	code, stdout, _ := d.read(t, with("deal", "show", deal.ID)...)
+	if code != 0 || !strings.Contains(stdout, "\nClosed by\tthe CRM's stage, won\n") {
+		t.Errorf("deal show of a deal the CRM closed:\n%s", stdout)
+	}
+	// The account's next card is its own, and closes nothing more.
+	code, _, stderr = d.read(t, with("brief", account, "--as-of", "2027-01-15")...)
+	if code != 0 || strings.Contains(stderr, "Deal: ") || strings.Contains(stderr, "closed") || closes() != 1 {
+		t.Errorf("brief after the deal closed: exit %d, %d closes\n%s", code, closes(), stderr)
+	}
+
+	// deal close reads the final card first. When that card holds the opportunity as closed, lost, the CRM's
+	// stage closes the deal and the reason is not recorded.
+	second := book("2", "Negotiation", false, false)
+	var other dealResult
+	d.result(t, &other, with("deal", "new", second, "--as-of", "2027-01-15")...)
+	book("2", "Closed Lost", true, false)
+	code, stdout, stderr = d.read(t, with("deal", "close", other.ID, "--reason", "Went quiet", "--as-of", "2027-01-15")...)
+	if code != 0 || !strings.Contains(stderr, "The CRM holds the deal's opportunity as closed, lost, so the deal closed on "+
+		"that as the card was made. The reason given was not recorded.\n") ||
+		!strings.Contains(stdout, "\nClosed by\tthe CRM's stage, lost\n") || strings.Contains(stdout, "Went quiet") {
+		t.Fatalf("deal close after the CRM closed the opportunity: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if n := d.count(t, `SELECT count(*) FROM deals WHERE ref = $1 AND close_basis = 'crm_stage' AND close_outcome = 'lost'
+		AND close_reason IS NULL`, other.ID); n != 1 || closes() != 2 {
+		t.Errorf("the second deal: %d closed on the stage, %d closes", n, closes())
+	}
+	// A card bound to no deal closes none. The deal's opportunity is closed in the CRM, and a person closes the
+	// deal while the card is read: the card is the account's own, and the stage is not tried on it.
+	third := book("3", "Negotiation", false, false)
+	var raced dealResult
+	d.result(t, &raced, with("deal", "new", third, "--as-of", "2027-01-15")...)
+	book("3", "Closed Won", true, true)
+	live, err := d.owner.Workspace(ctx, "invented-books")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, err := workspaceReads(ctx, d.owner, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := from.open(ctx, "crm", "calls", "slack"); err != nil {
+		t.Fatal(err)
+	}
+	scopes, during := []string{"crm:read", "calls:read", "slack:read"}, true
+	sealed, err := from.publish(ctx, cards.Principal{WorkspaceID: live.ID, TokenID: receipts.Fingerprint(randomToken()),
+		Scopes: scopes, Verify: func() ([]string, bool) {
+			if during {
+				during = false
+				if _, _, err := d.owner.CloseDeal(ctx, postgres.DealClose{WorkspaceID: live.ID, Ref: raced.ID,
+					Reason: "Closed by hand"}); err != nil {
+					t.Error(err)
+				}
+			}
+			return scopes, true
+		}}, third, "2027-01-15", "")
+	if err != nil || from.stage != "" {
+		t.Fatalf("a card read while its deal closed: %v, stage %q", err, from.stage)
+	}
+	if bound, err := d.owner.DealOfBrief(ctx, live.ID, sealed.BriefID); err != nil || bound != "" {
+		t.Errorf("the card belongs to %q: %v", bound, err)
+	}
+	if n := d.count(t, "SELECT count(*) FROM receipts WHERE tool = 'close_deal' AND arguments ->> 'deal' = $1", raced.ID); n != 1 {
+		t.Errorf("%d close receipts name the deal a person closed, of 1", n)
+	}
+	if n := d.count(t, "SELECT count(*) FROM gtm_integrity_violations()"); n != 0 {
+		t.Errorf("the integrity check finds %d violations", n)
+	}
+	d.everyToolIsNamed(t)
+}
+
+// An opportunity is closed when the CRM says so, and for a CRM that gives a stage alone at closed_won or
+// closed_lost.
+func TestStageOutcome(t *testing.T) {
+	for record, want := range map[string]string{
+		`{"is_closed": true, "is_won": true, "stage": "Closed Won"}`:   "won",
+		`{"is_closed": true, "is_won": false, "stage": "Closed Lost"}`: "lost",
+		`{"is_closed": false, "is_won": false, "stage": "closed_won"}`: "",
+		`{"stage": "closed_won"}`:                                      "won",
+		`{"stage": "closed_lost"}`:                                     "lost",
+		`{"stage": "negotiation"}`:                                     "",
+		`{}`:                                                           "",
+	} {
+		value, err := strictjson.LoadsText(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stageOutcome(value.(*strictjson.Object)); got != want {
+			t.Errorf("%s: %q, not %q", record, got, want)
+		}
 	}
 }
