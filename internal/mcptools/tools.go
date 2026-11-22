@@ -207,9 +207,9 @@ func (s *server) read(ctx context.Context, view Opened, call mcp.Call, arguments
 		rows[i] = record
 	}
 	result := strictjson.NewObject("source", readSource[call.Tool], "records", rows, "untrusted_data", true)
-	if more {
-		// Present only when true, so a complete result keeps its shape.
-		result.Set("has_more", true)
+	if call.Tool == "search_accounts" {
+		// Always stated, so a caller never takes a missing field for a complete list.
+		result.Set("has_more", more)
 	}
 	return result, nil
 }

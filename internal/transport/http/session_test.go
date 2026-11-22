@@ -47,14 +47,17 @@ func newSite(t *testing.T, sessionTTL time.Duration) *site {
 	return siteOn(t, postgrestest.New(t), sessionTTL)
 }
 
-// siteOn serves a fixture's database.
-func siteOn(t *testing.T, f *postgrestest.Fixture, sessionTTL time.Duration) *site {
+// siteOn serves a fixture's database, with each change made to the server's configuration first.
+func siteOn(t *testing.T, f *postgrestest.Fixture, sessionTTL time.Duration, changes ...func(*httptransport.Config)) *site {
 	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	origin := "https://" + ts.Listener.Addr().String()
-	s, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
-		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionTTL: sessionTTL, SessionKey: testKey},
-		f.Store, authz.Evidence{Store: f.Store})
+	cfg := httptransport.Config{PublicOrigin: origin,
+		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionTTL: sessionTTL, SessionKey: testKey}
+	for _, change := range changes {
+		change(&cfg)
+	}
+	s, err := httptransport.New(cfg, f.Store, authz.Evidence{Store: f.Store})
 	if err != nil {
 		t.Fatal(err)
 	}

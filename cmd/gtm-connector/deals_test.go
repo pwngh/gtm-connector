@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -448,6 +449,34 @@ func TestDealOnSalesforce(t *testing.T) {
 	if made.Card == nil || made.Deal.LatestCard == nil || made.Card.BriefID != made.Deal.LatestCard.BriefID ||
 		!strings.HasPrefix(made.Card.Text, "DEAL CARD: ") {
 		t.Errorf("the deal's card: %+v", made)
+	}
+	// With no --as-of, a deal on Salesforce plans from today's date in UTC: the contract it binds is the
+	// earliest that ends on or after that day. The clock stands at an instant whose date in its own zone
+	// is the day before its date in UTC. One contract ends on each of those two days and one a year on,
+	// so today's UTC date binds the second, and a planning day after it binds the third.
+	previous := wallClock
+	wallClock = func() time.Time { return time.Date(2031, 5, 5, 23, 30, 0, 0, time.FixedZone("west", -7*3600)) }
+	t.Cleanup(func() { wallClock = previous })
+	dated, err := strictjson.LoadsText(`{"Account": [{"Id": "001000000000777AAA", "Name": "Dated contracts",
+		"Industry": "Testing", "AccountNumber": null}], "Contact": [], "Opportunity": [], "Contract": [
+		{"Id": "800000000000001AAA", "AccountId": "001000000000777AAA", "Status": "Activated", "StatusCode": "Activated",
+		 "StartDate": "2030-01-01", "ContractTerm": 12, "EndDate": "2031-05-05"},
+		{"Id": "800000000000002AAA", "AccountId": "001000000000777AAA", "Status": "Activated", "StatusCode": "Activated",
+		 "StartDate": "2030-01-01", "ContractTerm": 12, "EndDate": "2031-05-06"},
+		{"Id": "800000000000003AAA", "AccountId": "001000000000777AAA", "Status": "Activated", "StatusCode": "Activated",
+		 "StartDate": "2030-01-01", "ContractTerm": 24, "EndDate": "2032-05-06"}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := org.Add(dated.(*strictjson.Object))
+	d.result(t, &deal, append([]string{"deal", "new", account}, where...)...)
+	if text(deal.Contract) != "ctr-sf-800000000000002AAA" || text(deal.RenewsOn) != "2031-05-06" {
+		t.Fatalf("deal new with no --as-of: %+v", deal)
+	}
+	d.result(t, &deal, append([]string{"deal", "close", deal.ID}, where...)...)
+	d.result(t, &deal, append([]string{"deal", "new", account, "--as-of", "2031-05-07"}, where...)...)
+	if text(deal.Contract) != "ctr-sf-800000000000003AAA" {
+		t.Fatalf("deal new planned from the day after: %+v", deal)
 	}
 }
 
