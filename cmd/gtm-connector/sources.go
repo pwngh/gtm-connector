@@ -480,8 +480,11 @@ func (r *reads) day() string {
 	if r.backend("crm") == "sqlite" {
 		return cards.DemoAsOf
 	}
-	return time.Now().UTC().Format("2006-01-02")
+	return wallClock().UTC().Format("2006-01-02")
 }
+
+// wallClock is the clock a planning day is read from. Tests set it.
+var wallClock = time.Now
 
 // described is how a command names one source: by its kind, or as not connected.
 func (r *reads) described(source string) string {

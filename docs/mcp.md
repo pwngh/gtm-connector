@@ -70,8 +70,8 @@ scope opens one source.
 
 A read answers with `structuredContent` holding `source`, `records` and `untrusted_data: true`. Every
 record carries a `record_ref`, such as `crm/accounts/acc-003`, `calls/call_notes/note-003` or
-`slack/messages/msg-003`. When more than 100 accounts match a name search, the result adds
-`has_more: true`, and otherwise the field is absent.
+`slack/messages/msg-003`. A `search_accounts` result also holds `has_more`: `true` when more than 100 accounts match a name
+search, and `false` otherwise. No other read states it.
 
 The result's `_meta` holds `gtm.demo/auditId`, the ID of the call's receipt. [Sources](sources.md)
 describes what each source holds.

@@ -712,3 +712,38 @@ func TestMountedReadsInsideABriefCheckTheBearerAgain(t *testing.T) {
 		t.Fatalf("a brief whose bearer expired before it was saved: %d %s", response.Code, response.Body)
 	}
 }
+
+// search_accounts always says whether more accounts match than it returned: has_more is false for a
+// complete list and true for a cut one, so a caller never takes a missing field for a complete list. No
+// other read states it.
+func TestSearchAlwaysSaysWhetherMoreMatch(t *testing.T) {
+	m := mount(t, nil, nil)
+	m.fixture()
+	said := func(tool string, arguments map[string]any) any {
+		t.Helper()
+		response, row := m.call(tool, tool, arguments, bearer("read"))
+		content, _ := at(decode(t, response.Body.Bytes()), "result", "structuredContent").(map[string]any)
+		if row.Status != "ok" || content == nil {
+			t.Fatalf("%s: %+v %s", tool, row, response.Body)
+		}
+		more, stated := content["has_more"]
+		if !stated {
+			return nil
+		}
+		return more
+	}
+	if more := said("search_accounts", map[string]any{"query": "thornfield"}); more != false {
+		t.Errorf("a complete search says has_more %v", more)
+	}
+	m.book.cut = true
+	if more := said("search_accounts", map[string]any{"query": "thornfield"}); more != true {
+		t.Errorf("a cut search says has_more %v", more)
+	}
+	for _, tool := range []string{"get_account", "list_opportunities", "read_call_notes", "read_slack_messages"} {
+		response, _ := m.call(tool, tool, map[string]any{"account_id": "acc-003"}, bearer("read"))
+		content, _ := at(decode(t, response.Body.Bytes()), "result", "structuredContent").(map[string]any)
+		if _, stated := content["has_more"]; content == nil || stated {
+			t.Errorf("%s states has_more: %s", tool, response.Body)
+		}
+	}
+}

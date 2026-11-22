@@ -62,6 +62,8 @@ type watched struct {
 	*demo.Store
 	url    string
 	before func(tool string)
+	// cut makes a search say that more accounts match than it returns, as a CRM does past its bound.
+	cut bool
 
 	mu          sync.Mutex
 	reads       []string
@@ -107,7 +109,7 @@ func (w *watched) Search(_ context.Context, query string, number *string, accoun
 	}
 	w.note("search_accounts")
 	records, more := w.Store.Search(query, accounts)
-	return records, more, nil
+	return records, more || w.cut, nil
 }
 
 func (w *watched) Opportunities(_ context.Context, accounts []string) ([]*strictjson.Object, error) {
