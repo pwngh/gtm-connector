@@ -1254,7 +1254,12 @@ await scenario('deals: keys and the filter', async () => {
   await until(tab, () => location.pathname === '/deals' && document.querySelectorAll('.deals-row').length === 30);
   await tab.focus('input[name=q]');
   await tab.keyboard.type('thorn');
-  await until(tab, () => document.querySelectorAll('.deals-row').length === 1);
+  // This wait has timed out in WebKit a few times with no change to the page. When it does, say what the page held.
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 1).catch(async error => {
+    const held = await tab.evaluate(() => ({value: document.querySelector('input[name=q]')?.value, q: new URL(location.href).searchParams.get('q'),
+      rows: document.querySelectorAll('.deals-row').length, focus: document.activeElement?.getAttribute('name') ?? document.activeElement?.className ?? document.activeElement?.tagName}));
+    throw new Error(`${error.message}; the field held ${JSON.stringify(held.value)}, the address ?q=${held.q}, ${held.rows} rows showed, and focus was on ${held.focus}`);
+  });
   const narrowed = await tab.evaluate(() => ({q: new URL(location.href).searchParams.get('q'), value: document.querySelector('input[name=q]').value, count: document.querySelector('.deals-head__count').textContent,
     name: document.querySelector('.deals-row__name').textContent, href: document.querySelector('.deals-row').getAttribute('href')}));
   check(narrowed.q === 'thorn' && narrowed.value === 'thorn' && narrowed.count === '1 of 30' && narrowed.name === 'Thornfield Wren LLP' && narrowed.href === '/deals/acc-003?q=thorn',
