@@ -118,7 +118,7 @@ test('every golden card: each shown sentence once as its whole text, every other
       `${at}: the gaps in Not read's order`,
     );
   }
-  assert.equal(sentences, 90 + 1297 + 73);
+  assert.equal(sentences, 90 + 1297 + 89);
 });
 
 test('people said: the groups in order, each with its count, newest first, attribution as recorded', () => {
