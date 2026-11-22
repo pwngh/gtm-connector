@@ -61,6 +61,10 @@ var exitCodes = map[string]int{
 // Error is a refused read: one fixed code and nothing else.
 type Error struct {
 	Code string
+	// Returned says what became of a grant a sign-in did not keep: "revoked" when Slack confirmed that the
+	// grant's token is revoked, "unconfirmed" when it did not, and "" when no grant was given back: none
+	// was obtained, its token does not expire, or it is the saved sign-in's own.
+	Returned string
 	// retry is the whole seconds a 429 asked to wait, plus one. Zero means it named no usable delay.
 	retry int
 }

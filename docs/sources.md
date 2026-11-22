@@ -688,6 +688,15 @@ terminal, refuses with `slack_login_unconfirmed` and saves nothing. The one-time
 any program that reads the opener's argument first, and that program could approve as its own Slack
 user. The question is what keeps such an approval from being saved.
 
+A grant the sign-in does not keep is given back when its token expires: when the sign-in stops before
+anything is saved, for scopes other than the ones asked for, another identity than the saved one, or
+an approval not confirmed at the terminal, the command asks Slack to revoke the grant's access token,
+under a `slack_sign_in_revoke` receipt, and its refusal says whether Slack confirmed. A token Slack did
+not confirm revoking may still be live. Two tokens are never revoked this way: one that does not
+expire, which is the person's one token for the app and may be another workspace's saved sign-in, and
+one that is this workspace's saved sign-in's own. For those, revoke the app's authorization in Slack. The page is good for one use: when
+the ten minutes pass, or the page is closed, run the command again for a new one.
+
 Each request the sign-in commands make to Slack runs under a receipt of its step, committed first, in
 the workspace the command names.
 
@@ -699,8 +708,11 @@ The Slack app needs:
 - for [speaker roles](cards.md#speaker-roles) by the author's profile, also `users:read`, which gives
   each author's Slack workspace, and `users:read.email`, which gives the author's profile email.
 
-No other scope is requested, and a grant that returns other scopes is refused. A sign-in needs a
-history scope: one that asks only for `users:read` or `users:read.email` is refused as
+No other scope is requested, and a grant that returns other scopes is refused. Slack adds every scope
+a person ever granted an app to each new grant, so keep this app for reading alone: an app that also
+posts, or a grant made once with more scopes, makes every later sign-in return them, and the connector
+refuses it until that person revokes the app's authorization in Slack. A sign-in needs a history
+scope: one that asks only for `users:read` or `users:read.email` is refused as
 `slack_invalid_configuration`. A bot grant is refused
 as `slack_token_type_unsupported`.
 
@@ -717,7 +729,7 @@ is refused with `slack_identity_mismatch`, and the saved one stays.
 
 | Command | What it does | Slack requests |
 | --- | --- | ---: |
-| `debug slack connect --client-id ID --redirect-uri URI` | Signs in through the browser and saves the sign-in as ready | 2 |
+| `debug slack connect --client-id ID --redirect-uri URI` | Signs in through the browser and saves the sign-in as ready | 2, or up to 3 when the grant is given back |
 | `debug slack status` | Reads the saved file. A missing sign-in exits 0. | 0 |
 | `debug slack status --check` | Verifies authentication, and refreshes a token near its expiry once. It does not show that a thread is readable. | 1 or 2 |
 | `debug slack disconnect` | Removes the local sign-in. Repeating it succeeds. | 0 |
@@ -880,11 +892,11 @@ A reason sets the exit code of a command, and is a step `code` in `debug slack c
 | `slack_not_connected`, `slack_reconnect_required` | 3 | Run `debug slack connect`. |
 | `slack_browser_unavailable` | 1 | Retry where a system browser works. |
 | `slack_callback_unavailable` | 1 | Free the registered localhost port. |
-| `slack_login_timeout` | 1 | Retry and approve within ten minutes. |
+| `slack_login_timeout` | 1 | Run the command again and approve within ten minutes. A sign-in page is good for one use. |
 | `slack_login_denied` | 3 | Retry only if you intend to approve. |
 | `slack_login_unconfirmed` | 3 | The approval was not confirmed at the terminal, and nothing was saved. Retry, and type `yes` only for your own Slack user. |
 | `slack_oauth_rejected` | 3 | Check the app's PKCE setting, redirect and workspace approval. |
-| `slack_scope_mismatch` | 3 | Use a grant with exactly the selected scopes. |
+| `slack_scope_mismatch` | 3 | Slack adds every scope a person ever granted the app to each new grant. In Slack, open the app's page in the workspace's app directory, choose **Your authorization**, then **Revoke authorization**, and sign in again. |
 | `slack_identity_mismatch` | 3 | Restore the original identity, or use another workspace. |
 | `slack_token_type_unsupported` | 3 | Use a user grant from a public PKCE client. |
 | `slack_selection_invalid`, `slack_crm_configuration_invalid`, `slack_account_not_found` | 2 | Correct the account, link, channel or timestamp. Find the account ID with `accounts`. |

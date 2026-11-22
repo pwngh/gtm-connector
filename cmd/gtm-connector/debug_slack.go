@@ -960,7 +960,13 @@ func (r *run) slackFailed(ctx context.Context, err error) *failure {
 	case "slack_connection_busy", "slack_storage_failed":
 		next = "gtm-connector debug slack " + r.action + " --help"
 	}
-	return &failure{code: exit, next: next, message: code + ": " + slackAuthFailures[code]}
+	return &failure{code: exit, next: next, message: code + ": " + slackAuthFailures[code] + grantReturned[refused.Returned]}
+}
+
+// grantReturned is what a sign-in that did not keep its grant says became of it at Slack.
+var grantReturned = map[string]string{
+	"revoked":     " Slack confirmed that the grant's token is revoked.",
+	"unconfirmed": " Slack did not confirm that the grant's token is revoked: revoke the app's authorization in Slack.",
 }
 
 // slackRefusal is the failure of a fixed code of the Slack source.
@@ -975,10 +981,11 @@ func slackSourceFailure(refused *slack.Error) *failure {
 			message: "slack_storage_failed: " + slackAuthFailures["slack_storage_failed"]}
 	}
 	if message, auth := slackAuthFailures[refused.Code]; auth && slackAuthOnly[refused.Code] {
-		return &failure{code: exit, next: "gtm-connector debug slack connect --help", message: refused.Code + ": " + message}
+		return &failure{code: exit, next: "gtm-connector debug slack connect --help",
+			message: refused.Code + ": " + message + grantReturned[refused.Returned]}
 	}
 	message, next := slackDetails(refused.Code)
-	return &failure{code: exit, next: next, message: refused.Code + ": " + message}
+	return &failure{code: exit, next: next, message: refused.Code + ": " + message + grantReturned[refused.Returned]}
 }
 
 // slackDetails is slack_workflow.slack_failure_details: what a code means and the command to run next.
@@ -1022,14 +1029,17 @@ var slackAuthFailures = map[string]string{
 	"slack_not_connected":        "No usable Slack connection is saved. Connect with an existing registered public app.",
 	"slack_browser_unavailable":  "The system browser could not open. Retry from a session with a working browser.",
 	"slack_callback_unavailable": "The registered localhost callback could not start. Free its port and retry.",
-	"slack_login_timeout":        "Browser approval did not finish within ten minutes. Repeat the connect command.",
-	"slack_login_denied":         "Slack authorization was declined. Retry only when you intend to approve the user scopes.",
+	"slack_login_timeout": "Browser approval did not finish within ten minutes. Repeat the connect command for " +
+		"a new sign-in page: a page is good for one use.",
+	"slack_login_denied": "Slack authorization was declined. Retry only when you intend to approve the user scopes.",
 	"slack_login_unconfirmed": "The Slack approval was not confirmed at this terminal, and nothing was saved. " +
 		"Repeat the connect command, and type yes only for the Slack user you approved as.",
 	"slack_oauth_rejected": "Slack rejected authorization. Check the existing app's PKCE, registered redirect, " +
 		"and workspace approval settings.",
-	"slack_scope_mismatch": "The grant does not match the selected history scopes. " +
-		"Use an existing grant with exactly those scopes.",
+	"slack_scope_mismatch": "The grant's scopes are not the history scopes asked for. Slack adds every scope a " +
+		"person ever granted the app, so an earlier grant of other scopes causes this. In Slack, open the app's " +
+		"page in the workspace's app directory, choose Your authorization, then Revoke authorization, and " +
+		"repeat the connect command.",
 	"slack_identity_mismatch": "The connection identity does not match. Restore the original identity or " +
 		"use another private connection folder.",
 	"slack_token_type_unsupported": "The grant is not a supported user token. Use a user-only PKCE desktop grant.",

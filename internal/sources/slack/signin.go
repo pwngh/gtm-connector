@@ -174,7 +174,8 @@ func randomText(n int) string {
 // Connect signs in to an existing public Slack app: it opens the browser at Slack's authorization page,
 // waits up to ten minutes for the approval to reach the registered localhost redirect, exchanges the code
 // with its PKCE verifier, checks the identity the token is for, and saves the sign-in as ready. A folder
-// that holds a sign-in for one identity is never given another. It returns the public status.
+// that holds a sign-in for one identity is never given another. A grant it does not keep, for its scopes,
+// its identity or the operator's answer, is given back to Slack (see returned). It returns the public status.
 func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, progress Progress) (*strictjson.Object, error) {
 	if cfg.port == 0 {
 		return nil, refuse("slack_invalid_configuration")
@@ -197,16 +198,36 @@ func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, p
 			}
 			return authorizeURL + "?" + query
 		}
-		finish := func(ctx context.Context, code string) error {
+		finish := func(ctx context.Context, code string) (err error) {
+			// The grant the exchange gave, until the sign-in starts to save it: from the first write the
+			// grant may be on disk, and is not given back.
+			var granted *Credentials
+			defer func() {
+				if err != nil && granted != nil {
+					err = r.returned(ctx, granted, err)
+				}
+			}()
+			under := saving{under, func() { granted = nil }}
 			b := newBudget(r.Clock)
 			progress.tell("exchange", "running")
 			// The exchange's receipt is finished with what its answer gives once it is read: a grant that
 			// is not one this sign-in can keep fails it.
 			var candidate Credentials
-			err := r.audited(ctx, "slack_sign_in_exchange", func(ctx context.Context) error {
+			err = r.audited(ctx, "slack_sign_in_exchange", func(ctx context.Context) error {
 				obtained := r.Clock.now()
 				document, err := r.exchange(ctx, b, code, verifier, cfg)
 				if err != nil {
+					return err
+				}
+				// A token that is the saved sign-in's is never given back: the saved sign-in still reads with
+				// it.
+				if granted = grantOf(document); granted != nil && previous != nil &&
+					granted.AccessToken.Reveal() == previous.AccessToken.Reveal() {
+					granted = nil
+				}
+				// The exchange's time is checked once its grant is known, so a grant that came too late is
+				// given back too.
+				if _, err := b.remaining(); err != nil {
 					return err
 				}
 				if candidate, err = parseInitial(document, cfg, obtained); err != nil {
@@ -262,6 +283,58 @@ func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, p
 	return result, nil
 }
 
+// grantOf is the access token of an exchange's answer, as the one credential of a grant to give back, or
+// nil when the answer holds none to give back. Only a token that expires is given back: Slack makes a new
+// one for each approval. A token that does not expire is the person's one token for the app, which another
+// workspace's saved sign-in may be reading with, so it is left.
+func grantOf(document *strictjson.Object) *Credentials {
+	nested, _ := document.Get("authed_user")
+	user, isObject := object(nested)
+	if !isObject {
+		return nil
+	}
+	token, _ := user.Get("access_token")
+	access, usable := validToken(token)
+	if _, expires := user.Get("expires_in"); !usable || !expires {
+		return nil
+	}
+	return &Credentials{AccessToken: access}
+}
+
+// returnTime is how long giving a grant back may take.
+const returnTime = 15 * time.Second
+
+// saving is a sign-in's store that says when a sign-in starts to be written.
+type saving struct {
+	Saved
+	started func()
+}
+
+func (s saving) Save(ctx context.Context, document *Credentials) error {
+	s.started()
+	return s.Saved.Save(ctx, document)
+}
+
+// returned gives back a grant the sign-in does not keep: it asks Slack to revoke the grant's access token,
+// under a receipt of its own and within a time of its own, since the sign-in's may be over or cancelled.
+// Whatever stopped the sign-in is given as it was, and a refusal of the sign-in's own also says whether
+// Slack confirmed: a token Slack did not confirm revoking may still be live.
+func (r *Reader) returned(ctx context.Context, granted *Credentials, cause error) error {
+	limited, cancel := context.WithTimeout(context.WithoutCancel(ctx), returnTime)
+	defer cancel()
+	state := "revoked"
+	if err := r.revoke(limited, granted); err != nil {
+		state = "unconfirmed"
+	}
+	var refused *Error
+	if errors.As(cause, new(*AuditFailed)) || !errors.As(cause, &refused) {
+		return cause
+	}
+	answered := *refused
+	answered.Returned = state
+	return &answered
+}
+
 // exchange spends the approval's code for the grant, with the PKCE verifier and no secret. Its answer
 // holds the new tokens, so it is not searched for them. A refusal of the code is slack_oauth_rejected.
 func (r *Reader) exchange(ctx context.Context, b *budget, grant, verifier string, cfg Configuration) (*strictjson.Object, error) {
@@ -300,9 +373,6 @@ func (r *Reader) exchange(ctx context.Context, b *budget, grant, verifier string
 			// A code Slack does not accept is a rejected authorization, not a sign-in to renew.
 			return nil, refuse("slack_oauth_rejected")
 		}
-		return nil, err
-	}
-	if _, err := b.remaining(); err != nil {
 		return nil, err
 	}
 	return document, nil
