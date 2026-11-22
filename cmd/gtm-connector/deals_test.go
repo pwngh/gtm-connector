@@ -412,6 +412,7 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 	if reply := b.send(http.MethodGet, "/v1/deals/thornfield-2027-2e3hke", nil, nil); reply.StatusCode != http.StatusForbidden {
 		t.Errorf("GET of a revoked account's deal: %d", reply.StatusCode)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // On Salesforce the deal binds the account's opportunity and the contract a card counts the renewal to, and
@@ -478,6 +479,7 @@ func TestDealOnSalesforce(t *testing.T) {
 	if text(deal.Contract) != "ctr-sf-800000000000003AAA" {
 		t.Fatalf("deal new planned from the day after: %+v", deal)
 	}
+	d.everyToolIsNamed(t)
 }
 
 // hookedCRM serves the demo book through a CRM that calls hook before each read, until the test ends.
