@@ -66,6 +66,7 @@ type inventedSlack struct {
 	challenge string // the PKCE challenge of the authorization page the browser was sent to
 	valid     map[string]bool
 	expiresIn int    // the lifetime of the access tokens it grants; 0 grants tokens that do not expire
+	scope     string // the scopes of the grant it gives; empty is channels:history
 	unrevoked bool   // auth.revoke does not confirm
 	user      string // the user it grants; empty is inventedUser
 	paths     []string
@@ -128,7 +129,11 @@ func (s *inventedSlack) RoundTrip(request *http.Request) (*http.Response, error)
 			access, refresh = rotatedAccess, rotatedRefresh
 		}
 		s.valid[access] = true
-		user := map[string]any{"id": s.userID(), "scope": "channels:history", "access_token": access, "token_type": "user"}
+		scope := "channels:history"
+		if s.scope != "" {
+			scope = s.scope
+		}
+		user := map[string]any{"id": s.userID(), "scope": scope, "access_token": access, "token_type": "user"}
 		if s.expiresIn > 0 {
 			user["refresh_token"], user["expires_in"] = refresh, s.expiresIn
 		}
@@ -1221,7 +1226,7 @@ func TestSlackSignInRequestsRunUnderReceipts(t *testing.T) {
 // A new approval is saved only once the person at the command's terminal says yes to the Slack user, team
 // and workspace it came from. Whoever loads the one-time start page first can finish the sign-in with an
 // approval of their own; any answer but yes saves nothing, though the exchange and the identity check keep
-// their receipts.
+// their receipts. The invented Slack's token here does not expire, so it is not revoked.
 func TestASignInIsSavedOnlyOnTheOperatorsYes(t *testing.T) {
 	d, folder, _ := slackSetup(t)
 	api := newInventedSlack(t)
@@ -1321,5 +1326,115 @@ func TestASlackSignInChangesNothingBeforeItsReceipt(t *testing.T) {
 	}
 	if got := d.audited(t, "other"); got != "slack_sign_in_exchange:error:200:request_failed" {
 		t.Errorf("the receipts of an exchange with no grant: %s", got)
+	}
+}
+
+// A grant the sign-in does not keep is given back: the connector asks Slack to revoke its token, under a
+// receipt, so no live token it refused stays at Slack. That holds for a grant with other scopes than were
+// asked for, which Slack gives when the person ever granted the app more, and for an approval the operator
+// does not confirm. The refusal says whether Slack confirmed, and for scopes names the step that resets them.
+func TestAGrantTheSignInDoesNotKeepIsRevoked(t *testing.T) {
+	d, folder, _ := slackSetup(t)
+	api := newInventedSlack(t)
+	// A grant whose token expires: Slack makes a new token for each approval.
+	api.redirect, api.expiresIn = freeRedirect(t), 12*3600
+	connect := func(workspace string) []string {
+		return []string{"debug", "slack", "connect", "--client-id", inventedClient, "--redirect-uri", api.redirect,
+			"--state-dir", workspace}
+	}
+	refused := func(workspace string) string {
+		t.Helper()
+		api.paths = nil
+		b := useBrowser(t, api, "")
+		message := slackRefused(t, d, 3, connect(workspace)...)
+		for range b.answers {
+		}
+		return message
+	}
+	// Slack adds every scope the person ever granted the app. The request that gives the grant back runs
+	// under its own receipt, committed first.
+	owner := conn(t, d.ownerURL)
+	var pending []string
+	api.before = func(path string) {
+		var tools []string
+		if err := owner.QueryRow(ctx, `SELECT coalesce(array_agg(r.tool ORDER BY r.started_at), '{}') FROM receipts r
+			WHERE r.status = 'pending'`).Scan(&tools); err != nil {
+			t.Error(err)
+		}
+		pending = append(pending, path+" "+strings.Join(tools, ","))
+	}
+	api.scope = "channels:history,chat:write"
+	message := refused("stacked")
+	if want := []string{"/api/oauth.v2.access slack_sign_in_exchange", "/api/auth.revoke slack_sign_in_revoke"}; !slices.Equal(pending, want) {
+		t.Errorf("the receipts pending as each request arrived: %q", pending)
+	}
+	api.before = nil
+	if !strings.HasPrefix(message, "slack_scope_mismatch: ") || !strings.Contains(message, "Revoke authorization") ||
+		!strings.Contains(message, "Slack confirmed that the grant's token is revoked.") {
+		t.Errorf("a grant with more scopes: %s", message)
+	}
+	if got := strings.Join(api.paths, " "); got != "/api/oauth.v2.access /api/auth.revoke" || api.valid[inventedAccess] {
+		t.Errorf("a grant with more scopes: asked Slack for %s, and its token is still live: %t", got, api.valid[inventedAccess])
+	}
+	if got := d.audited(t, "stacked"); got != "slack_sign_in_exchange:error:200:request_failed slack_sign_in_revoke:ok:200:" {
+		t.Errorf("the receipts of a grant with more scopes: %s", got)
+	}
+	if _, err := os.Lstat(filepath.Join(folder, "slack-stacked.json")); err == nil {
+		t.Error("a refused grant was saved")
+	}
+	// When Slack does not confirm, the refusal says so.
+	api.unrevoked = true
+	if message := refused("unconfirmed"); !strings.HasPrefix(message, "slack_scope_mismatch: ") ||
+		!strings.Contains(message, "Slack did not confirm that the grant's token is revoked") {
+		t.Errorf("a grant Slack did not confirm revoking: %s", message)
+	}
+	// An approval the operator does not confirm at the terminal is given back too.
+	api.scope, api.unrevoked = "", false
+	api.paths = nil
+	b := useBrowser(t, api, "")
+	answerTerminal(t, "no")
+	message = slackRefused(t, d, 3, connect("declined")...)
+	for range b.answers {
+	}
+	if !strings.HasPrefix(message, "slack_login_unconfirmed: ") ||
+		!strings.Contains(message, "Slack confirmed that the grant's token is revoked.") || api.valid[inventedAccess] {
+		t.Errorf("an approval not confirmed at the terminal: %s", message)
+	}
+	if got := strings.Join(api.paths, " "); got != "/api/oauth.v2.access /api/auth.test /api/auth.revoke" {
+		t.Errorf("an approval not confirmed: asked Slack for %s", got)
+	}
+	// A token that does not expire is the person's one token for the app, which another workspace's saved
+	// sign-in may read with, so it is left, and the refusal names the step in Slack.
+	api.expiresIn, api.scope = 0, "channels:history,chat:write"
+	message = refused("lasting")
+	if !strings.HasPrefix(message, "slack_scope_mismatch: ") || !strings.Contains(message, "Revoke authorization") ||
+		strings.Contains(message, "is revoked") || !api.valid[inventedAccess] ||
+		strings.Join(api.paths, " ") != "/api/oauth.v2.access" {
+		t.Errorf("a grant whose token does not expire: %s, asked Slack for %q", message, api.paths)
+	}
+	api.expiresIn, api.scope = 12*3600, ""
+	// A sign-in that is saved is never given back: an approval the operator declines that returns the
+	// saved sign-in's own token leaves the saved sign-in working.
+	useBrowser(t, api, "")
+	if code, stdout, stderr := d.line(t, connect("kept")...); code != 0 {
+		t.Fatalf("connect: exit %d\n%s%s", code, stdout, stderr)
+	}
+	api.paths = nil
+	b = useBrowser(t, api, "")
+	answerTerminal(t, "no")
+	message = slackRefused(t, d, 3, connect("kept")...)
+	for range b.answers {
+	}
+	if !strings.HasPrefix(message, "slack_login_unconfirmed: ") || strings.Contains(message, "revoked") ||
+		strings.Contains(strings.Join(api.paths, " "), "auth.revoke") || !api.valid[inventedAccess] {
+		t.Errorf("a declined approval that gave the saved token again: %s, asked Slack for %q", message, api.paths)
+	}
+	if code, stdout, stderr := d.line(t, "debug", "slack", "status", "--check", "--state-dir", "kept"); code != 0 {
+		t.Errorf("the saved sign-in after a declined approval: exit %d\n%s%s", code, stdout, stderr)
+	}
+	// The wait for the browser names what to do when it ends.
+	if text := slackAuthFailures["slack_login_timeout"]; !strings.Contains(text, "Repeat the connect command") ||
+		!strings.Contains(text, "one use") {
+		t.Errorf("the timeout says: %s", text)
 	}
 }
