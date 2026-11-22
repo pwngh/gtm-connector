@@ -536,3 +536,109 @@ func TestACloseLosesToWhatChangedTheDeal(t *testing.T) {
 		t.Errorf("a close that names its card, of a closed deal: %v, %d receipts", err, refused(409, "deal_changed"))
 	}
 }
+
+// The database keeps the rules of a close on the CRM's stage for any writer: it has an outcome, no reason and
+// no person; its receipt names the deal, the opportunity and the outcome too; and its final card rests on a
+// read of the deal's opportunity. A person's close has no outcome.
+func TestACloseOnTheCRMsStageHoldsForAnyWriter(t *testing.T) {
+	f := postgrestest.New(t)
+	deal := postgrestest.RegisterDeal(t, f, postgrestest.Account, "", "invented")
+	card := postgrestest.Publish(t, f, postgrestest.Account, f.Reader.ID, "brief-during")
+	ok(t, linkCard(t, f, card.Card.ID, deal.Ref, postgrestest.Account))
+	stage := func(outcome any, reason, receipt any) error {
+		return sql(t, f, `UPDATE deals SET state = 'closed', closed_at = now(), close_basis = 'crm_stage',
+			close_reason = $3, close_receipt_id = $4, final_card_id = $5, close_outcome = $6
+			WHERE workspace_id = $1 AND ref = $2`, f.Workspace.ID, deal.Ref, reason, receipt, card.Card.ID, outcome)
+	}
+	named := func(members string) postgres.Receipt {
+		return receiptNaming(t, f, deal.AccountRef, `{"deal":"`+deal.Ref+`","basis":"crm_stage","reason":null,"final_card":"`+
+			card.Card.ID+`"`+members+`}`)
+	}
+	whole := named(`,"opportunity":"opp-1","outcome":"won"`)
+	for label, refused := range map[string]error{
+		"with no outcome":                             stage(nil, nil, whole.ID),
+		"with an outcome that is neither":             stage("open", nil, whole.ID),
+		"with a reason":                               stage("won", "Renewed", whole.ID),
+		"with another outcome than its receipt names": stage("lost", nil, whole.ID),
+		"under a receipt that names no opportunity":   stage("won", nil, named(`,"outcome":"won"`).ID),
+		"under a receipt that names another":          stage("won", nil, named(`,"opportunity":"opp-2","outcome":"won"`).ID),
+		"on a card that did not read its opportunity": stage("won", nil, whole.ID),
+	} {
+		if refused == nil {
+			t.Errorf("a deal closed on the stage %s", label)
+		}
+	}
+	if err := stage("won", nil, whole.ID); err == nil || !strings.Contains(err.Error(), "did not read its opportunity") {
+		t.Errorf("a close whose receipt is whole, on a card that read no opportunity: %v", err)
+	}
+	// A card that read opportunities, and not the deal's, closes nothing on the stage; one that read the
+	// deal's does.
+	another := postgrestest.PublishReading(t, f, "list_opportunities", postgrestest.Account, f.Reader.ID, "brief-another",
+		postgrestest.Record("opportunities", "opp-2", "id", "opp-2", "account_id", postgrestest.Account))
+	ok(t, linkCard(t, f, another.Card.ID, deal.Ref, postgrestest.Account))
+	on := func(card string) error {
+		receipt := receiptNaming(t, f, deal.AccountRef, `{"deal":"`+deal.Ref+`","basis":"crm_stage","reason":null,"final_card":"`+
+			card+`","opportunity":"opp-1","outcome":"won"}`)
+		return sql(t, f, `UPDATE deals SET state = 'closed', closed_at = now(), close_basis = 'crm_stage',
+			close_receipt_id = $3, final_card_id = $4, close_outcome = 'won' WHERE workspace_id = $1 AND ref = $2`,
+			f.Workspace.ID, deal.Ref, receipt.ID, card)
+	}
+	if err := on(another.Card.ID); err == nil || !strings.Contains(err.Error(), "did not read its opportunity") {
+		t.Errorf("a close on a card that read another opportunity: %v", err)
+	}
+	// An open deal holds no part of a close: a deal registered with a reason is refused, and the same deal
+	// without one is taken.
+	ok(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, "acc-004", "Invented account"))
+	accountRead := postgrestest.Read(t, f, "get_account", "acc-004", "",
+		postgrestest.Record("accounts", "acc-004", "id", "acc-004", "name", "Invented account"))
+	opportunities := postgrestest.Read(t, f, "list_opportunities", "acc-004", "")
+	register := func(reason any) error {
+		return sql(t, f, `INSERT INTO deals (workspace_id, ref, account_ref, account_read_id, opportunities_read_id,
+			close_reason) VALUES ($1, 'raw-2027-aaaaaa', 'acc-004', $2, $3, $4)`, f.Workspace.ID, accountRead.ID,
+			opportunities.ID, reason)
+	}
+	if err := register("Renewed"); err == nil {
+		t.Errorf("an open deal was registered with a reason")
+	}
+	ok(t, register(nil))
+
+	// A person's close has no outcome.
+	person := closeReceipt(t, f, deal, "Renewed", another.Card.ID)
+	if err := sql(t, f, `UPDATE deals SET state = 'closed', closed_at = now(), close_basis = 'person',
+		close_reason = 'Renewed', close_receipt_id = $3, final_card_id = $4, close_outcome = 'won'
+		WHERE workspace_id = $1 AND ref = $2`, f.Workspace.ID, deal.Ref, person.ID, another.Card.ID); err == nil {
+		t.Errorf("a person's close took an outcome")
+	}
+	if n := count(t, f, `SELECT count(*) FROM deals WHERE state = 'closed'`); n != 0 {
+		t.Errorf("%d deals are closed after every refusal", n)
+	}
+	// The deal's newest card read its opportunity: the close on the stage is taken.
+	reading := postgrestest.PublishReading(t, f, "list_opportunities", postgrestest.Account, f.Reader.ID, "brief-reading",
+		postgrestest.Record("opportunities", "opp-1", "id", "opp-1", "account_id", postgrestest.Account))
+	ok(t, linkCard(t, f, reading.Card.ID, deal.Ref, postgrestest.Account))
+	ok(t, on(reading.Card.ID))
+	if n := count(t, f, `SELECT count(*) FROM gtm_integrity_violations()`); n != 0 {
+		t.Errorf("the integrity check finds %d violations", n)
+	}
+}
+
+// CloseDeal says the deal closed once the close has committed, also when the read that follows fails: a
+// caller must not take the error for a close that did not happen.
+func TestACommittedCloseIsReportedAsOne(t *testing.T) {
+	f := postgrestest.New(t)
+	deal := postgrestest.RegisterDeal(t, f, postgrestest.Account, "", "invented")
+	postgres.SetCrash(f.Store, func(at string) error {
+		if at == "close:committed" {
+			return errors.New("the connection dropped")
+		}
+		return nil
+	})
+	_, changed, err := f.Store.CloseDeal(ctx, postgres.DealClose{WorkspaceID: f.Workspace.ID, Ref: deal.Ref, Reason: "Renewed"})
+	postgres.SetCrash(f.Store, nil)
+	if err == nil || !changed {
+		t.Errorf("a close whose follow-up read failed: changed %v, %v", changed, err)
+	}
+	if stored, err := f.Store.Deal(ctx, f.Workspace.ID, deal.Ref); err != nil || stored.State != "closed" {
+		t.Errorf("the deal: %+v %v", stored, err)
+	}
+}

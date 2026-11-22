@@ -61,10 +61,12 @@ type dealView struct {
 	LatestCard   *dealCardView `json:"latest_card"`
 }
 
-// dealClose is how a deal closed. A deal closed before closes were recorded has the basis alone.
+// dealClose is how a deal closed: by a person, with their reason, or on the CRM's closed stage, with its
+// outcome. A deal closed before closes were recorded has the basis alone.
 type dealClose struct {
 	Basis     string  `json:"basis"`
 	Reason    *string `json:"reason"`
+	Outcome   *string `json:"outcome"`
 	ClosedBy  *string `json:"closed_by"`
 	Receipt   *string `json:"receipt"`
 	FinalCard *string `json:"final_card"`
@@ -100,8 +102,9 @@ func viewDeal(d postgres.Deal) (dealView, error) {
 		if err != nil {
 			return dealView{}, err
 		}
-		view.Close = &dealClose{Basis: d.Close.Basis, Reason: optional(reason), ClosedBy: optional(d.Close.By),
-			Receipt: optional(d.Close.ReceiptID), FinalCard: optional(d.Close.FinalCard)}
+		view.Close = &dealClose{Basis: d.Close.Basis, Reason: optional(reason), Outcome: optional(d.Close.Outcome),
+			ClosedBy: optional(d.Close.By),
+			Receipt:  optional(d.Close.ReceiptID), FinalCard: optional(d.Close.FinalCard)}
 	}
 	return view, nil
 }

@@ -78,8 +78,10 @@ which belongs to no deal. A deal is a binding around cards, not a new card forma
 the account's call and thread only when they are [matched](#matches) to the deal, and is otherwise
 the card the account would get. A closed deal keeps
 its cards, and is never opened again or deleted. `deal close` closes one with a person's reason, under a
-`close_deal` receipt, on its final card: the deal's newest card as it closes. The account's next deal is
-a new one, with the next ID. The database refuses a card bound to a deal it was
+`close_deal` receipt, on its final card: the deal's newest card as it closes. The connector closes one
+itself when a card that `brief`, a refresh or `deal close` publishes for it reads the opportunity the deal
+binds as closed in the CRM, won or lost: that card is the final card. Whichever comes first closes the
+deal. The account's next deal is a new one, with the next ID. The database refuses a card bound to a deal it was
 not published during, and a restore checks the same.
 
 ## Deal routes
@@ -130,15 +132,17 @@ card is published for the deal: by `brief`, by a refresh, or as a brief an assis
 `close` is `null` while the deal is open. For a closed deal it says how it closed:
 
 ```json
-{"basis": "person", "reason": "Renewed for two years", "closed_by": null,
+{"basis": "person", "reason": "Renewed for two years", "outcome": null, "closed_by": null,
  "receipt": "RECEIPT_ID", "final_card": "CARD_ID"}
 ```
 
 `reason` is the person's own words, neutralized as source text is. `closed_by` is `null` for the owner,
 who closes with `deal close`. `receipt` is the `close_deal` receipt, which
 `GET /api/v1/receipts/{receipt}` serves. `final_card` is the deal's newest card as it closed, or `null`
-for a deal that had none. A deal closed before closes were recorded has `basis` `unrecorded` and the
-other four `null`.
+for a deal that had none. A deal the connector closed on the CRM's closed stage has
+`basis` `crm_stage`, `outcome` `won` or `lost`, no `reason` and no `closed_by`, and its `final_card` is
+the card that read the opportunity as closed. A deal closed before closes were recorded has `basis`
+`unrecorded` and the other five `null`.
 
 `POST /v1/deals` registers the deal as the signed-in person: both reads name them. The grant is checked
 before any source is opened, and again just before each read. Without a live grant on the account,
@@ -160,7 +164,8 @@ it reads the CRM, and the account's call and thread when they are matched to the
 new card that belongs to the deal. Each read and the seal name the person. The grant on the deal's
 account is checked before any source is opened, before each read and as the card is published. The
 card is that deal's or is not published: when the deal closes while it is read, nothing is published,
-also when the account's next deal is open by then. The cards before it stay. A refresh that publishes
+also when the account's next deal is open by then. The cards before it stay. A refresh whose card reads the
+deal's opportunity as closed in the CRM closes the deal on that card, and the answer shows it closed. A refresh that publishes
 no card leaves the deal's last card as its newest. The answer is read after the card is published, so
 an answer that fails then, as for a grant revoked in between, does not undo the card.
 

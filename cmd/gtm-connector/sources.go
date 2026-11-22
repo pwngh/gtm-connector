@@ -290,6 +290,9 @@ type reads struct {
 	// gate, when set, keeps a card's reads of imported calls and live Slack threads to those matched to the
 	// deal the card is read for.
 	gate *matchGate
+	// stage is won or lost when the card publish made read its deal's opportunity as closed and the deal was
+	// closed on it.
+	stage string
 	// The reads opened so far.
 	crmReads   crmSource
 	callsReads callsSource
