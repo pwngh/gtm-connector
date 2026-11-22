@@ -115,9 +115,10 @@ ran, it exits `1`, saves nothing, and asks you to run it again.
 (see [speaker roles](cards.md#speaker-roles)). Repeat it for each seller. It is taken with `salesforce`, `calls` and
 `slack`, never with `demo`.
 
-The list replaces the saved one, so name every seller each time. A `connect` without `--seller` keeps
-the saved list, and `connect status` shows it. A list holds at most 200 entries of 1 to 200 characters
-each; a longer one exits `2`.
+The list is the workspace's: Salesforce, calls and Slack share it, whichever `connect` set it. It
+replaces the saved one, so name every seller each time. A `connect` without `--seller` keeps the saved
+list, `--seller ''` given once clears it, and `connect status` shows it. A list holds at most 200
+entries of 1 to 200 characters each; a longer one exits `2`.
 
 | Option | Taken with | Meaning |
 | --- | --- | --- |
@@ -156,7 +157,8 @@ gtm-connector connect calls --state-dir renewals --company-domain northwind.exam
 - An alias whose target names no person of the account's card changes nothing.
 
 Each list replaces the saved one when it is given, so name every entry each time. A `connect` without
-`--company-domain` keeps the saved domains, and one without `--alias` keeps the saved aliases.
+`--company-domain` keeps the saved domains, and one without `--alias` keeps the saved aliases. Either
+given once with an empty value, as `--alias ''`, clears its list.
 `connect status` shows both when they are set.
 
 | Refusal (exit `2`) | When |
@@ -254,10 +256,17 @@ finds `Alder  Mills plc`. On the demo book only the letters A to Z match in eith
 compares letters as its own `LIKE` does. Without `--query`, or with a text of no words, every account
 matches. Rows are ordered by name and then ID.
 
+`--account-number NUMBER`, in a Salesforce workspace, gives the accounts with exactly that
+`AccountNumber` instead, at most two. It is not taken with `--query`, and the demo book has no account
+numbers: both exit `2`.
+
 ```text
 ID       ACCOUNT              INDUSTRY        RENEWAL
 acc-003  Thornfield Wren LLP  Legal services  2027-02-08
 ```
+
+The table of a Salesforce workspace has the column `NUMBER`, the account number, in place of
+`RENEWAL`: a Salesforce account carries no renewal date of its own.
 
 `--json` gives one object, with or without `--query`: `accounts`, an array of at most 100 account
 objects as the CRM returns them, and `has_more`, which is `true` when more accounts match and
@@ -269,7 +278,11 @@ receipt that `audit` lists.
 
 ### `brief`
 
-`brief ACCOUNT_ID` reads every connected source for one account, publishes the card, and prints it.
+`brief ACCOUNT` reads every connected source for one account, publishes the card, and prints it.
+`ACCOUNT` is the account's ID, or a name that `accounts --query` finds exactly one account for; text
+output then names it on stderr, as `Account: acc-003 "Thornfield Wren LLP".` A name that several
+accounts hold exits `2` and lists up to five of them by ID, and a text that is no ID and no account's
+name is refused as an ID.
 `--without-calls` leaves `calls:read` out of the card's grant: the call notes read is refused under
 its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 `--as-of YYYY-MM-DD` sets the day the card plans from.
@@ -677,7 +690,8 @@ Slack did not confirm prints its result and exits `5`. `--account-number`, on `d
 ### Install commands
 
 Each writes text only, prints a failure as `gtm-connector: MESSAGE`, and exits `1` when it fails.
-[Running it](operations.md) covers them.
+With `--help` or `-h` each prints what it takes and does nothing. [Running it](operations.md) covers
+them.
 
 | Command | What it does |
 | --- | --- |

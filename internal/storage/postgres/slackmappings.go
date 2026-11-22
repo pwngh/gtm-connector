@@ -26,9 +26,17 @@ type SlackMapping struct {
 	Generations map[string]int64
 }
 
+// SlackMappingConflict says what a refused selection needs: replace when its account has another thread, and
+// reassign when its thread belongs to another account. It is an ErrSlackMappingConflict.
+type SlackMappingConflict struct{ Replace, Reassign bool }
+
+func (c *SlackMappingConflict) Error() string { return ErrSlackMappingConflict.Error() }
+func (c *SlackMappingConflict) Unwrap() error { return ErrSlackMappingConflict }
+
 var (
 	// ErrSlackMappingConflict refuses a selection whose account has another thread, without replace, or
-	// whose thread belongs to another account, without reassign, or one past MaxSlackMappings.
+	// whose thread belongs to another account, without reassign, each as a *SlackMappingConflict, or one
+	// past MaxSlackMappings.
 	ErrSlackMappingConflict = errors.New("the selection conflicts with a saved Slack mapping")
 	// ErrSlackMappingSource refuses a selection made under other bindings than the saved ones.
 	ErrSlackMappingSource = errors.New("the saved Slack mappings were made under other sources")
@@ -111,7 +119,7 @@ func (s *Store) SaveSlackMapping(ctx context.Context, workspaceID string, m Slac
 			saved = *account
 			return nil
 		case account != nil && !replace, thread != nil && !reassign:
-			return ErrSlackMappingConflict
+			return &SlackMappingConflict{Replace: account != nil && !replace, Reassign: thread != nil && !reassign}
 		}
 		if thread != nil {
 			if _, err := tx.Exec(ctx, `UPDATE slack_mappings SET channel_id = NULL, thread_ts = NULL, mapping = NULL,

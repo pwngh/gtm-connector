@@ -197,7 +197,7 @@ reads inside it are its child receipts, whose `request_id` is
 
 | Command | Receipts |
 | --- | --- |
-| `brief` | One per read: `get_account`, `list_opportunities`, `list_users` on Salesforce, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. |
+| `brief` | One per read: `get_account`, `list_opportunities`, `list_users` on Salesforce, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. Given a name in place of an ID, on a real CRM one `search_accounts` comes before all of these, in an `inspect-` run of its own. |
 | `demo --state-dir NAME` | Seven: the lookup, the refused call read, the card's four reads, and the seal. |
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |

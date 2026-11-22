@@ -83,8 +83,9 @@ type crmSource interface {
 	// org's users a speaker can be. An account the CRM does not hold is errAccountNotFound.
 	Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error)
 	// SearchAccounts gives the accounts whose name holds the query's words in their order, each as literal
-	// text, the first hundred by name and then ID, and whether more match.
-	SearchAccounts(ctx context.Context, query string) (accounts []*strictjson.Object, more bool, err error)
+	// text, the first hundred by name and then ID, and whether more match. With a number, and no query, it
+	// gives the accounts with exactly that account number, where the CRM has account numbers.
+	SearchAccounts(ctx context.Context, query string, number *string) (accounts []*strictjson.Object, more bool, err error)
 }
 
 // errAccountNotFound is a CRM's answer for an account it does not hold.
@@ -730,15 +731,20 @@ func (r *reads) ownerRead(ctx context.Context, tool string, arguments *strictjso
 	return records, err
 }
 
-// searchAccounts is the accounts command's search of the CRM.
-func (r *reads) searchAccounts(ctx context.Context, query string) (accounts []*strictjson.Object, more bool, err error) {
+// searchAccounts is the accounts command's search of the CRM, by name or, with a number, by account number.
+// Its receipt names the number when one is given, as the MCP tool's does.
+func (r *reads) searchAccounts(ctx context.Context, query string, number *string) (accounts []*strictjson.Object, more bool, err error) {
 	crm, err := r.crm(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	records, err := r.ownerRead(ctx, "search_accounts", strictjson.NewObject("query", query),
+	arguments := strictjson.NewObject("query", query)
+	if number != nil {
+		arguments.Set("account_number", *number)
+	}
+	records, err := r.ownerRead(ctx, "search_accounts", arguments,
 		func(ctx context.Context) ([]*strictjson.Object, error) {
-			found, cut, err := crm.SearchAccounts(ctx, query)
+			found, cut, err := crm.SearchAccounts(ctx, query, number)
 			more = cut
 			return referenced(found), err
 		})
@@ -830,7 +836,12 @@ func (d demoBook) Read(ctx context.Context, tool, accountID string) ([]*strictjs
 	return records, err
 }
 
-func (d demoBook) SearchAccounts(_ context.Context, query string) ([]*strictjson.Object, bool, error) {
+// The demo book has no account numbers.
+func (d demoBook) SearchAccounts(_ context.Context, query string, number *string) ([]*strictjson.Object, bool, error) {
+	if number != nil {
+		return nil, false, refused("--account-number searches a Salesforce org. This workspace reads the demo book, " +
+			"which has no account numbers.")
+	}
 	accounts, more := d.book.SearchAccounts(query)
 	return accounts, more, nil
 }

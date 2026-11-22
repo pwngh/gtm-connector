@@ -57,6 +57,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -82,6 +83,49 @@ var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo",
 // setup, serve, token, backup, restore, health and version are this binary's besides, and --help lists
 // them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
+
+// installHelp is what each install command prints for --help. They take no --json and no --state-dir.
+var installHelp = map[string]string{
+	"setup": `usage: gtm-connector setup [-h]
+
+Make missing credentials, migrate the database, set up the app role, and make
+the demo workspace. Safe to run again. It reads GTM_OWNER_DATABASE_URL and
+GTM_HOME, and prints where the credentials are.
+`,
+	"serve": `usage: gtm-connector serve [-h] [--selection FILE]
+
+Run the HTTPS server, with the web app, the API and MCP at /mcp, until Ctrl-C.
+
+options:
+  -h, --help        show this help message and exit
+  --selection FILE  MCP clients read only the accounts this file names, and get
+                    the two brief tools. It is read once, at start.
+`,
+	"backup": `usage: gtm-connector backup [-h] --out FILE
+
+Write the database and the credentials folder to one file.
+
+options:
+  -h, --help  show this help message and exit
+  --out FILE  The backup file to write. It must not exist.
+`,
+	"restore": `usage: gtm-connector restore [-h] --in FILE
+
+Restore a backup into an empty database and credentials folder.
+
+options:
+  -h, --help  show this help message and exit
+  --in FILE   The backup file to restore.
+`,
+	"health": `usage: gtm-connector health [-h]
+
+Ask the local server's /healthz, and exit 1 unless it answers ok.
+`,
+	"version": `usage: gtm-connector version [-h]
+
+Print the commit this binary was built from and the Go version.
+`,
+}
 
 var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
 
@@ -169,6 +213,10 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 		if asJSON {
 			return s.fail(name, &failure{code: 2, next: "gtm-connector --help",
 				message: name + " writes text and takes no --json."})
+		}
+		if slices.Contains(args, "--help") || slices.Contains(args, "-h") {
+			fmt.Fprint(s.out, installHelp[name])
+			return 0
 		}
 		switch name {
 		case "serve":

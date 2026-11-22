@@ -928,8 +928,15 @@ func TestSlackCommandsRefuse(t *testing.T) {
 		t.Fatalf("map: exit %d\n%s", code, stderr)
 	}
 	if message := slackRefused(t, d, 3, "debug", "slack", "map", "--state-dir", "acme", "--account", cards[0].account,
-		"--channel", "C0123ABCD", "--thread-ts", "1799971200.000001"); !strings.HasPrefix(message, "slack_mapping_conflict: ") {
+		"--channel", "C0123ABCD", "--thread-ts", "1799971200.000001"); !strings.HasPrefix(message, "slack_mapping_conflict: ") ||
+		!strings.Contains(message, "--replace") || strings.Contains(message, "--reassign") {
 		t.Errorf("another thread without --replace: %s", message)
+	}
+	// The refusal names the flag that fits: a thread another account holds needs --reassign.
+	if message := slackRefused(t, d, 3, "debug", "slack", "map", "--state-dir", "acme", "--account", "acc-001",
+		"--channel", "C0123ABCD", "--thread-ts", "1799971200.000000"); !strings.HasPrefix(message, "slack_mapping_conflict: ") ||
+		!strings.Contains(message, "--reassign") || strings.Contains(message, "--replace") {
+		t.Errorf("another account's thread without --reassign: %s", message)
 	}
 
 	// A check of an account with no thread fails its steps, and says what to run next.
@@ -942,6 +949,15 @@ func TestSlackCommandsRefuse(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &check); code != 4 || err != nil || check.Status != "failed" ||
 		check.Steps[1].Code != "slack_mapping_missing" || check.Next != "gtm-connector debug slack map --help" {
 		t.Errorf("check of an unmapped account: exit %d\n%s", code, stdout)
+	}
+	// As text, a failed step names its code too, on a terminal and in a pipe.
+	for _, terminal := range []bool{false, true} {
+		t.Setenv("GTM_DATABASE_URL", d.appURL)
+		var out, errs bytes.Buffer
+		if code := dispatch(ctx, []string{"debug", "slack", "check", "--state-dir", "acme", "--account", "acc-001"},
+			screen{out: &out, err: &errs, terminal: terminal}); code != 4 || !strings.Contains(out.String(), "slack_mapping_missing") {
+			t.Errorf("check as text, terminal %t: exit %d\n%s%s", terminal, code, out.String(), errs.String())
+		}
 	}
 
 	// Another command that holds the sign-in's lock makes this one wait for nothing.

@@ -141,7 +141,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 		{[]string{"status", "--remove"}, "Error: connect status does not take --remove.\n"},
 		{[]string{"calls", "--remove", "--seller", "Dana Crest"}, "Error: --remove detaches a source and takes no other option.\n"},
 		{[]string{"cursor", "--remove"}, "Error: connect cursor does not take --remove.\n"},
-		{[]string{"slack", "--seller", ""}, sellers},
+		{[]string{"slack", "--seller", "", "--seller", "Dana Crest"}, sellers},
 		{[]string{"salesforce", "--org", "invented-alias", "--seller", long}, sellers},
 		{[]string{"salesforce", "--seller", "bad\xffname"}, sellers},
 		{many, sellers},

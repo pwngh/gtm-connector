@@ -45,6 +45,9 @@ var (
 	// An account search by a LIKE pattern on the name, or of every account, either within a selection.
 	search = regexp.MustCompile(`^SELECT Id, Name, Industry, AccountNumber FROM Account` +
 		`(?: WHERE (?:Name LIKE '%((?:[^\\']|\\.)*)%')?(?: AND )?(?:Id IN \(([^)]*)\))?)? ORDER BY Name, Id LIMIT 101$`)
+	// An account search by exact account number, also within a selection.
+	numbered = regexp.MustCompile(`^SELECT Id, Name, Industry, AccountNumber FROM Account WHERE AccountNumber = ` +
+		`'((?:[^\\']|\\.)*)'(?: AND Id IN \(([^)]*)\))? ORDER BY Id LIMIT 2$`)
 	// The opportunities of a selection of accounts.
 	selectedOpportunities = regexp.MustCompile(`^SELECT Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, ` +
 		`IsWon FROM Opportunity WHERE AccountId IN \(([^)]*)\) ORDER BY Id LIMIT 101$`)
@@ -229,6 +232,19 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 	case search.MatchString(query):
 		asked := search.FindStringSubmatch(query)
 		page = cursor{object: "Account", rows: o.named(asked[1], selected(asked[2]))}
+	case numbered.MatchString(query):
+		asked := numbered.FindStringSubmatch(query)
+		number, within := unescaped.ReplaceAllString(asked[1], "$1"), selected(asked[2])
+		var rows []*strictjson.Object
+		for account, accounts := range o.rows["Account"] {
+			for _, row := range accounts {
+				if held, _ := row.Get("AccountNumber"); held == number && (within == nil || within[account]) {
+					rows = append(rows, row)
+				}
+			}
+		}
+		sort.SliceStable(rows, func(i, j int) bool { return idOf(rows[i]) < idOf(rows[j]) })
+		page = cursor{object: "Account", rows: rows[:min(len(rows), 2)]}
 	case selectedOpportunities.MatchString(query):
 		var rows []*strictjson.Object
 		for account := range selected(selectedOpportunities.FindStringSubmatch(query)[1]) {
