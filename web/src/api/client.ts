@@ -3,7 +3,7 @@
 // server handed out. Refusals become ApiError with a kind the pages show, so a
 // refusal is never read as an empty result.
 
-import type {AccountCards, AccountList, CardDetail, Health, Json, ReceiptView, SessionView, UnitBody, UnitView} from './types.ts';
+import type {AccountCards, AccountList, CardDetail, Health, Json, MatchList, MatchView, ReceiptView, SessionView, UnitBody, UnitView} from './types.ts';
 
 export const sessionPath = '/api/v1/session';
 // Where the browser starts a sign-in through the company's identity provider.
@@ -169,6 +169,10 @@ export interface Api {
   unit(card: string, n: number, options?: ReadOptions): Promise<UnitView>;
   receipt(id: string, options?: ReadOptions): Promise<ReceiptView>;
   health(options?: ReadOptions): Promise<Health>;
+  /** The calls and threads that wait for a person to say which deal they belong to. */
+  matches(options?: ReadOptions): Promise<MatchList>;
+  /** Puts a waiting call or thread on one deal of its account, or with null keeps it off every card. */
+  decideMatch(csrf: string | null | undefined, id: string, deal: string | null): Promise<{match: MatchView}>;
 }
 
 interface SendOptions {
@@ -365,6 +369,12 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
         return {status: json.status};
       }
       throw response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, json);
+    },
+    matches({signal} = {}) {
+      return request('GET', '/v1/matches', {signal});
+    },
+    async decideMatch(csrf, id, deal) {
+      return request('POST', `/v1/matches/${segment(id)}`, {csrf, body: deal === null ? {decision: 'reject'} : {decision: 'match', deal}});
     },
   };
 }

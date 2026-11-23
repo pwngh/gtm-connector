@@ -128,7 +128,7 @@ const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 // an account's card list where it is not the demo's one card.
 const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003']),
   accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0, health: 'ok', extra: [], lists: {},
-  signIn: {oidc: false, demo: true}, companyRefusal: null};
+  signIn: {oidc: false, demo: true}, companyRefusal: null, matches: [], decisions: []};
 let base = '';
 // Resolves once no API request has been open for 300 ms.
 async function apiSettled() {
@@ -140,7 +140,7 @@ async function apiSettled() {
 function reset() {
   stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);
   stub.accounts = accounts; stub.times = null; stub.empty = new Set(); stub.principal = principal; stub.cardLists = 0; stub.mostCardLists = 0; stub.health = 'ok';
-  stub.extra = []; stub.lists = {}; stub.signIn = {oidc: false, demo: true}; stub.companyRefusal = null;
+  stub.extra = []; stub.lists = {}; stub.signIn = {oidc: false, demo: true}; stub.companyRefusal = null; stub.matches = []; stub.decisions = [];
 }
 // Serves the demo book: thirty granted accounts, each card on its own day.
 function serveBook() {stub.accounts = book; stub.granted = new Set(book.map(item => item.account)); stub.times = bookTime;}
@@ -215,6 +215,20 @@ async function api(request, response, path) {
   }
   if (!session) return refuse(response, 401, 'sign_in_required');
   let match;
+  // The matches that wait for a person, and a decision of one, as the Go server serves them: the write needs
+  // the public origin and the session's CSRF token, and the decided match is no longer waiting.
+  if (path === '/v1/matches' && request.method === 'GET') return send(response, 200, {matches: stub.matches});
+  if ((match = path.match(/^\/v1\/matches\/([^/]+)$/)) && request.method === 'POST') {
+    if (request.headers.origin !== base) return refuse(response, 403, 'origin_refused');
+    if (request.headers['x-csrf-token'] !== `c-${id}`) return refuse(response, 403, 'csrf_invalid');
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const given = JSON.parse(body || '{}'), found = stub.matches.find(item => item.id === decodeURIComponent(match[1]));
+    if (!found) return refuse(response, 403, 'not_permitted');
+    stub.decisions.push({id: found.id, ...given});
+    stub.matches = stub.matches.filter(item => item !== found);
+    return send(response, 200, {match: {...found, state: given.decision === 'reject' ? 'rejected' : 'matched', deal: given.deal ?? null, basis: 'person'}});
+  }
   if (path === '/api/v1/accounts') return send(response, 200, {accounts: stub.accounts.filter(item => stub.granted.has(item.account))});
   if ((match = path.match(/^\/api\/v1\/accounts\/([^/]+)\/cards$/))) {
     const account = decodeURIComponent(match[1]);
@@ -254,7 +268,7 @@ async function api(request, response, path) {
 const types = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json'};
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://stub').pathname;
-  if (path.startsWith('/api/')) {
+  if (path.startsWith('/api/') || path.startsWith('/v1/')) {
     stub.log.push(`${request.method} ${path}`);
     stub.pending++;
     // How many card lists are open at once, at most.
@@ -1275,6 +1289,80 @@ await scenario('deals: keys and the filter', async () => {
   const cleared = await tab.evaluate(() => ({q: new URL(location.href).searchParams.has('q'), focus: document.activeElement?.name}));
   check(none === 'No deal matches. Clear the filter' && !cleared.q && cleared.focus === 'q', `a filter that matches nothing says so, and Clear the filter brings the rows back (${none})`);
   check(tab.errors.length === 0, `no page errors (${tab.errors.join(' | ')})`);
+  await tab.context().close();
+});
+
+// A call or thread that fits more than one deal waits for a person. The list says how many wait, and the page
+// lists them with each deal they could join.
+const waitingMatch = (id, over = {}) => ({id, kind: 'call', item: `note-${id}`, account: 'acc-003', account_name: 'Thornfield Wren LLP', at: null,
+  candidates: ['thornfield-2026-2e3hke', 'thornfield-2027-2e3hke-2'], state: 'waiting', deal: null, basis: 'time_unknown', decided_by: null,
+  decided_at: '2027-01-15T15:00:00Z', supersedes: null, receipt: `r-${id}`, superseded: false, stale: false, ...over});
+for (const width of widths.filter(width => width === 390 || width === 1440)) {
+  await scenario(`deals: what waits for a person, at ${width}`, async () => {
+    serveBook();
+    stub.matches = [waitingMatch('m-1'), waitingMatch('m-2', {kind: 'thread', at: '2027-01-12T15:00:00Z', basis: 'deal_closed', candidates: ['thornfield-2027-2e3hke-2']}),
+      waitingMatch('m-3')];
+    const tab = await page({width});
+    await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await until(tab, () => document.querySelector('.deals-waiting__link')?.textContent === '3 calls and threads wait for your OK');
+    const link = await tab.$eval('.deals-waiting__link', node => ({height: node.getBoundingClientRect().height, href: node.getAttribute('href')}));
+    check(link.height >= 44 && link.href === '/deals/matches', `${width}: the list says three calls and threads wait, in a link 44 high to the page that lists them`);
+    await tab.click('.deals-waiting__link');
+    await until(tab, () => location.pathname === '/deals/matches' && document.querySelectorAll('.matches-row').length === 3);
+    const rows = await tab.$$eval('.matches-row', nodes => nodes.map(row => ({text: row.innerText.replace(/\s+/g, ' ').trim(),
+      buttons: [...row.querySelectorAll('button')].map(button => ({text: button.textContent, height: button.getBoundingClientRect().height, width: button.getBoundingClientRect().width}))})));
+    check(rows[0].text.startsWith('Call Thornfield Wren LLP No time recorded') && rows[1].text.startsWith('Slack thread Thornfield Wren LLP 12 Jan 2027') &&
+      rows[0].buttons.map(button => button.text).join('|') === 'Add to thornfield-2026-2e3hke|Add to thornfield-2027-2e3hke-2|Leave off' &&
+      rows[1].buttons.map(button => button.text).join('|') === 'Add to thornfield-2027-2e3hke-2|Leave off',
+      `${width}: each row says what waits, whose and when, and offers each deal it fits and to leave it off (${rows[0].text.slice(0, 60)})`);
+    check(rows.every(row => row.buttons.every(button => button.height >= 44 && button.width >= 44)) && !rows.some(row => /note-m-/.test(row.text)),
+      `${width}: every button is at least 44 by 44, and no row shows the item's own ID`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `matches-${width}.png`)});
+    const title = await tab.evaluate(() => ({h1: document.querySelector('main h1')?.textContent, back: document.querySelector('.matches .deals-back') !== null, rail: document.querySelectorAll('.deals-row').length}));
+    check(title.h1 === 'Waiting for your OK' && (width >= 1100 ? !title.back && title.rail === 30 : title.back && title.rail === 0),
+      `${width}: the page is titled, ${width >= 1100 ? 'beside the list' : 'whole, with a link back to Deals'}`);
+    // Leave off: one write with the CSRF token, and the row goes once the server has confirmed.
+    const posts = () => stub.log.filter(entry => /^POST \/v1\/matches\//.test(entry)).length;
+    await tab.click('.matches-row[data-match="m-1"] button:has-text("Leave off")');
+    await until(tab, () => document.querySelectorAll('.matches-row').length === 2);
+    check(posts() === 1 && stub.decisions.length === 1 && stub.decisions[0].id === 'm-1' && stub.decisions[0].decision === 'reject' && !('deal' in stub.decisions[0]),
+      `${width}: Leave off sends one request, which names no deal, and the row goes after the server confirms`);
+    // A decision the server refuses stays on its row, with the server's code, and the row stays.
+    stub.steer = (method, path) => method === 'POST' && path === '/v1/matches/m-3' ? {status: 409, code: 'match_decided'} : null;
+    await tab.click('.matches-row[data-match="m-3"] button:has-text("Leave off")');
+    await until(tab, () => document.querySelector('.matches-row[data-match="m-3"] .ui-refusal') !== null);
+    const refusedRow = await tab.$eval('.matches-row[data-match="m-3"]', row => row.innerText.replace(/\s+/g, ' '));
+    check(/Server code: match_decided/.test(refusedRow) && await tab.locator('.matches-row').count() === 2, `${width}: a refused decision shows the server's code on its own row, which stays`);
+    stub.steer = null;
+    await tab.click('.matches-row[data-match="m-2"] button:has-text("Add to thornfield-2027-2e3hke-2")');
+    await until(tab, () => document.querySelectorAll('.matches-row').length === 1);
+    check(stub.decisions.length === 2 && stub.decisions[1].id === 'm-2' && stub.decisions[1].decision === 'match' && stub.decisions[1].deal === 'thornfield-2027-2e3hke-2',
+      `${width}: Add to a deal names that deal`);
+    if (width >= 1100) {
+      await until(tab, () => document.querySelector('.deals-waiting__link')?.textContent === '1 call or thread waits for your OK');
+      check(true, `${width}: the line above the list counts what still waits`);
+    }
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${width}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+await scenario('deals: nothing waits', async () => {
+  serveBook();
+  const tab = await page({width: 1440});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30);
+  await apiSettled();
+  check(await tab.locator('.deals-waiting').count() === 0 && stub.log.includes('GET /v1/matches'), 'with nothing waiting the list shows no line about it');
+  await tab.goto(`${base}/deals/matches`, {waitUntil: 'networkidle'});
+  await until(tab, () => document.querySelector('.matches-none') !== null);
+  check((await tab.innerText('.matches-none')).startsWith('Nothing waits.'), 'the page itself says that nothing waits');
+  stub.steer = (method, path) => path === '/v1/matches' ? {status: 403, code: 'not_permitted'} : null;
+  await tab.reload({waitUntil: 'networkidle'});
+  await until(tab, () => document.querySelector('.matches .ui-refusal') !== null);
+  check(await tab.locator('.matches-none').count() === 0, 'a refused read of what waits is shown as a refusal, not as nothing waiting');
   await tab.context().close();
 });
 

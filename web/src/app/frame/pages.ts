@@ -2,7 +2,7 @@ import {Building2, History, List, ListChecks, type LucideIcon} from 'lucide-reac
 import type {ComponentType} from 'react';
 import type {AccountView} from '../../api/types.ts';
 import type {PaletteItem} from '../../ui/Palette.tsx';
-import {dealAt, dealHref} from '../deals/deals.ts';
+import {dealAt, dealHref, matchesPath} from '../deals/deals.ts';
 import {Activity, Coverage, Deals} from '../lazyPages.ts';
 import {serverPaths} from '../routes.ts';
 
@@ -43,7 +43,7 @@ export const areas: Area[] = [
         icon: List,
         sub: 'Every deal the server grants you',
         Page: Deals,
-        nested: pathname => dealAt(pathname) !== null,
+        nested: pathname => dealAt(pathname) !== null || pathname === matchesPath,
       },
     ],
   },

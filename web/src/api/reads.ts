@@ -157,6 +157,8 @@ const detachedStore: ServerStore = {
     unit: nothing,
     receipt: nothing,
     health: nothing,
+    matches: nothing,
+    decideMatch: nothing,
   },
   subscribe: () => () => undefined,
   getSnapshot: () => detachedState,

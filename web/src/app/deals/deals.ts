@@ -48,10 +48,13 @@ export function tabAt(pathname: string): DealTab {
   return (dealPath.exec(pathname)?.[2] as DealTab | undefined) ?? 'card';
 }
 
-/** The deal an address opens: the one segment after /deals/, on the card, at /communications or at /text, or null. */
+/** Where the calls and threads that wait for a person are listed. */
+export const matchesPath = '/deals/matches';
+
+/** The deal an address opens: the one segment after /deals/, on the card, at /communications or at /text, or null. The matches page is no deal. */
 export function dealAt(pathname: string): string | null {
   const match = dealPath.exec(pathname);
-  if (!match?.[1]) {
+  if (!match?.[1] || pathname === matchesPath) {
     return null;
   }
   try {
@@ -131,3 +134,25 @@ export const cardReadLimit = 4;
 
 /** The display choice that hides the first-run hint. */
 export const hintKey = 'gtm-connector-deals-hint';
+
+/** The one line above the deal list when calls or threads wait for a person. */
+export function waitingLine(count: number): string {
+  return count === 1 ? '1 call or thread waits for your OK' : `${count} calls and threads wait for your OK`;
+}
+
+/** What a waiting match is, in a word or two. */
+export function matchKind(kind: string): string {
+  return kind === 'call' ? 'Call' : kind === 'thread' ? 'Slack thread' : kind;
+}
+
+/** Why the connector did not decide a match itself, from the basis the server gave. */
+export function matchReason(basis: string): string {
+  switch (basis) {
+    case 'time_unknown':
+      return 'It fits more than one deal of this account, so the connector did not choose.';
+    case 'deal_closed':
+      return 'The deal it was on is closed, and the account has a new deal open.';
+    default:
+      return 'It waits for a person to decide.';
+  }
+}

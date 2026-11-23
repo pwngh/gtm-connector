@@ -31,7 +31,10 @@ gtm deal thornfield-2027-2e3hke --refresh  # read the sources again first
 5. **The deal closes.** On Closed Won or Closed Lost the reads stop and the final card is sealed and archived.
 
 A call or thread that fits more than one deal waits in the matches queue for your OK, and reaches no
-card until someone decides it.
+card until someone decides it. When any wait, one line above the deal list says how many and opens the
+list of them: each says whether it is a call or a Slack thread, whose it is, when it was, and why the
+connector did not choose, and offers each deal it fits and to leave it off every card. It shows none of
+the words: they appear on the card once it is added.
 
 ## What flags a deal
 
