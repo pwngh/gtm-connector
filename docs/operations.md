@@ -143,8 +143,14 @@ when the provider publishes one. It leaves the provider's own session as it is.
 
 ## Health
 
-`/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
-are exactly the ones the binary carries. Otherwise it answers 503 with one of four statuses:
+`/healthz` answers 200 `{"failed_card_checks_24h":0,"status":"ok"}` when the database is reachable
+and its applied migrations are exactly the ones the binary carries. `failed_card_checks_24h` is how many
+checks of a stored card failed in the last 24 hours, in every workspace of the install: each failed
+`inspect` or `deal show` counts, so one damaged card read twice counts twice. A number above zero means a
+card no longer passes its check, and `audit --tool verify_card` in each workspace names it. The answer
+needs no sign-in, as the rest of `/healthz` needs none, and names no card and no workspace; someone who
+polls it can see when a failure is recorded and when it ages out. A count the database does not give
+answers 503 `database_unavailable`. Otherwise it answers 503 with one of four statuses:
 
 | Status | Meaning |
 | --- | --- |

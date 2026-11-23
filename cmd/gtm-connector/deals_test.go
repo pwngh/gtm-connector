@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
@@ -1281,6 +1283,94 @@ func TestAPersonClosesADealThroughTheRoute(t *testing.T) {
 	if err := json.Unmarshal(b.get("/v1/deals?all=1"), &listed); err != nil || len(listed.Deals) != 2 ||
 		listed.Deals[0].ID != open.ID || listed.Deals[1].ID != deal.ID {
 		t.Errorf("GET /v1/deals?all=1: %+v %v", listed, err)
+	}
+	d.everyToolIsNamed(t)
+}
+
+// A stored card that fails its check leaves a receipt: inspect and deal show refuse it as before, and each
+// refusal leaves one verify_card receipt for the card's account, finished as an error with what failed.
+// /healthz counts them. A card that passes leaves none.
+func TestACardThatFailsItsSealLeavesAReceipt(t *testing.T) {
+	d := setUpDemo(t)
+	d.connectDemo(t, defaultWorkspace)
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-003")
+	var made struct {
+		BriefID string `json:"brief_id"`
+	}
+	d.result(t, &made, "brief", "acc-003")
+	failures := func() int {
+		return d.count(t, `SELECT count(*) FROM receipts WHERE tool = 'verify_card' AND status = 'error' AND http_status = 409
+			AND error = 'seal_changed' AND account_ref = 'acc-003' AND principal_id IS NULL AND brief_id = $1
+			AND arguments ->> 'brief_id' = $1`, made.BriefID)
+	}
+	if code, _, stderr := d.read(t, "inspect", made.BriefID); code != 0 || failures() != 0 {
+		t.Fatalf("inspect of a sealed card: exit %d, %d failure receipts\n%s", code, failures(), stderr)
+	}
+	// The card's bytes are changed under the database's own rules, as only its owner can, with the triggers
+	// off: one space more, and the digest of the changed bytes.
+	owner, err := pgx.Connect(ctx, d.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close(ctx)
+	for _, statement := range []string{
+		`ALTER TABLE cards DISABLE TRIGGER USER`,
+		`UPDATE cards SET card_bytes = card_bytes || ' '::bytea, card_sha256 = sha256(card_bytes || ' '::bytea) WHERE brief_id = '` + made.BriefID + `'`,
+		`ALTER TABLE cards ENABLE TRIGGER USER`,
+	} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, message, _ := d.refusal(t, 2, "inspect", made.BriefID); message != cards.ErrNotSealed.Error() || failures() != 1 {
+		t.Errorf("inspect of a changed card: %s, %d failure receipts", message, failures())
+	}
+	if _, message, _ := d.refusal(t, 2, "deal", "show", deal.ID); message != cards.ErrNotSealed.Error() || failures() != 2 {
+		t.Errorf("deal show of a changed card: %s, %d failure receipts", message, failures())
+	}
+	if n, err := d.owner.FailedCardChecks(ctx); err != nil || n != 2 {
+		t.Errorf("the failed checks of the last day: %d %v", n, err)
+	}
+	// Only a failed check counts. A receipt that merely carries the tool's name does not: a caller of the MCP
+	// gate may send any name, and an interrupted write is swept to an error of its own.
+	for _, other := range []struct {
+		status int
+		code   string
+	}{{400, "unknown_tool"}, {503, "interrupted"}, {409, "already_decided"}} {
+		started, err := d.owner.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: d.workspace.ID,
+			OperationID: "other-" + other.code, TokenID: postgres.TokenID(""), Tool: "verify_card",
+			Arguments: json.RawMessage(`{}`), RequestID: json.RawMessage(`1`), Lease: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.owner.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: started.ID, LeaseToken: started.LeaseToken,
+			Status: "error", HTTPStatus: other.status, Error: other.code}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := d.owner.FailedCardChecks(ctx); err != nil || n != 2 {
+		t.Errorf("the failed checks beside other receipts of that name: %d %v", n, err)
+	}
+	// Bytes that are no card at all fail too, and leave their receipt.
+	for _, statement := range []string{
+		`ALTER TABLE cards DISABLE TRIGGER USER`,
+		`UPDATE cards SET card_bytes = 'not a card'::bytea, card_sha256 = sha256('not a card'::bytea) WHERE brief_id = '` + made.BriefID + `'`,
+		`ALTER TABLE cards ENABLE TRIGGER USER`,
+	} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, message, _ := d.refusal(t, 2, "inspect", made.BriefID); message != cards.ErrInvalidCard.Error() {
+		t.Errorf("inspect of bytes that are no card: %s", message)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE tool = 'verify_card' AND status = 'error' AND http_status = 409
+		AND error = 'card_invalid' AND brief_id = $1`, made.BriefID); n != 1 {
+		t.Errorf("%d receipts say the bytes are no card, of 1", n)
+	}
+	if n, err := d.owner.FailedCardChecks(ctx); err != nil || n != 3 {
+		t.Errorf("the failed checks of the last day: %d %v", n, err)
 	}
 	d.everyToolIsNamed(t)
 }

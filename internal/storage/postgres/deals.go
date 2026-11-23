@@ -587,3 +587,38 @@ func (s *Store) ViewDeal(ctx context.Context, v Viewer, ref string) (Deal, error
 	})
 	return deal, err
 }
+
+// RecordSealFailure leaves the receipt of a stored card that failed its check: a verify_card receipt for the
+// card's account and brief, by the principal that looked ("" for the owner), finished as error/409 with the
+// code of what failed. Each failed check leaves one.
+func (s *Store) RecordSealFailure(ctx context.Context, workspaceID, principal, account, brief, code string) error {
+	arguments, err := json.Marshal(map[string]string{"brief_id": brief})
+	if err != nil {
+		return err
+	}
+	run := newDecisionRun()
+	id := "verify-" + strings.TrimPrefix(run.id, "match-")
+	receipt, err := s.StartReceipt(ctx, ReceiptStart{WorkspaceID: workspaceID, OperationID: id + "/1",
+		PrincipalID: principal, TokenID: run.token, Tool: "verify_card", AccountRef: account, Arguments: arguments,
+		RequestID: json.RawMessage("1"), BriefID: brief, Lease: time.Minute})
+	if err != nil {
+		return err
+	}
+	return s.failDecision(ctx, receipt, 409, code)
+}
+
+// FailedCardChecks counts the failed card checks every workspace recorded in the last 24 hours, by the
+// database's clock: the receipts RecordSealFailure finished, each error/409 with one of its codes. A receipt
+// that only carries the tool's name is not one: a caller of the MCP gate may send any name, and an
+// interrupted write is swept to another error. The index receipts_failed_card_checks serves the count.
+func (s *Store) FailedCardChecks(ctx context.Context) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM receipts WHERE tool = 'verify_card' AND status = 'error'
+		AND http_status = 409 AND error = ANY($1) AND started_at >= statement_timestamp() - interval '24 hours'`,
+		SealFailureCodes).Scan(&n)
+	return n, err
+}
+
+// SealFailureCodes are the codes a failed card check is recorded under.
+var SealFailureCodes = []string{"seal_pending", "seal_changed", "seal_unread", "reads_changed", "number_unresolved",
+	"card_invalid"}

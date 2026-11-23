@@ -25,7 +25,12 @@ type schema struct {
 	state postgres.MigrationState
 	err   error
 	given *time.Duration
+	// failed and uncounted answer the count of failed card checks.
+	failed    int
+	uncounted error
 }
+
+func (s schema) FailedCardChecks(context.Context) (int, error) { return s.failed, s.uncounted }
 
 func (s schema) MigrationState(ctx context.Context) (postgres.MigrationState, error) {
 	if deadline, ok := ctx.Deadline(); ok {
@@ -37,7 +42,12 @@ func (s schema) MigrationState(ctx context.Context) (postgres.MigrationState, er
 func healthz(t *testing.T, s *httptransport.Server, code int, status, state string) {
 	t.Helper()
 	w := send(s, http.MethodGet, "/healthz", "127.0.0.1:8443", nil)
-	if w.Code != code || w.Body.String() != `{"status":"`+status+`"}`+"\n" {
+	want := `{"status":"` + status + `"}` + "\n"
+	if status == "ok" {
+		// A healthy answer also counts the stored cards that failed their check in the last day.
+		want = `{"failed_card_checks_24h":0,"status":"ok"}` + "\n"
+	}
+	if w.Code != code || w.Body.String() != want {
 		t.Errorf("%s: %d %q", state, w.Code, w.Body.String())
 	}
 }
@@ -65,6 +75,15 @@ func TestHealthzStatesTheDatabaseAndItsMigrations(t *testing.T) {
 			t.Errorf("%s: the check was given %s", c.state, given)
 		}
 	}
+	// A healthy answer gives the count as the store has it. A count that cannot be read is no healthy answer.
+	var given time.Duration
+	w := send(surfaceOn(t, schema{state: postgres.MigrationsCurrent, given: &given, failed: 3}), http.MethodGet, "/healthz",
+		"127.0.0.1:8443", nil)
+	if w.Code != http.StatusOK || w.Body.String() != `{"failed_card_checks_24h":3,"status":"ok"}`+"\n" {
+		t.Errorf("three failed checks: %d %q", w.Code, w.Body.String())
+	}
+	healthz(t, surfaceOn(t, schema{state: postgres.MigrationsCurrent, given: &given, uncounted: driver}),
+		http.StatusServiceUnavailable, "database_unavailable", "a count that cannot be read")
 }
 
 // relay carries TCP connections to target until stop, which also ends the
