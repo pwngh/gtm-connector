@@ -36,8 +36,8 @@ func (s *server) selected(account string) bool {
 	return s.Selection == nil || held
 }
 
-// listDeals is list_deals: the deals of the accounts the caller's principal is granted, open ones first and
-// each group by ID, and with a selection only those of selected accounts.
+// listDeals is list_deals: the open deals of the accounts the caller's principal is granted, by ID, and with a
+// selection only those of selected accounts. A closed deal is not listed; read_deal_card still gives it.
 func (s *server) listDeals(ctx context.Context, inv *mcp.Invocation) (*strictjson.Object, error) {
 	reads, principal := s.evidenceOf(inv)
 	deals, err := reads.Deals(ctx, principal)
@@ -49,7 +49,7 @@ func (s *server) listDeals(ctx context.Context, inv *mcp.Invocation) (*strictjso
 	}
 	records := []any{}
 	for _, deal := range deals {
-		if !s.selected(deal.AccountRef) {
+		if deal.State != "open" || !s.selected(deal.AccountRef) {
 			continue
 		}
 		record, err := dealRecord(deal)

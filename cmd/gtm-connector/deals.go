@@ -665,9 +665,46 @@ func (d dealRegistry) RegisterDeal(ctx context.Context, p authz.Principal, accou
 // alike, each under a get_account receipt finished as error/403 that reads nothing; the receipt of an unknown
 // deal names no account.
 func (d dealRegistry) RefreshDeal(ctx context.Context, p authz.Principal, ref string) error {
+	_, _, _, err := d.refreshed(ctx, p, ref)
+	return err
+}
+
+// CloseDeal closes an open deal for the person, with their reason. It makes the deal's final card as a refresh
+// does, with the refresh's refusals, then closes the deal on that card under a close_deal receipt that names
+// the person. The grant is checked again as that close commits. When the card read the deal's opportunity as
+// closed in the CRM, the stage closed the deal as the card was made: the close is then the connector's, with
+// no person and no reason. What stops the close after the card is published is marked
+// httptransport.ErrCardKept: the card stays the deal's.
+func (d dealRegistry) CloseDeal(ctx context.Context, p authz.Principal, ref, reason string) error {
+	sealed, from, deal, err := d.refreshed(ctx, p, ref)
+	if err != nil || from.stage != "" {
+		return err
+	}
+	// From here the final card is published and stays the deal's, whatever stops the close.
+	kept := func(err error) error { return fmt.Errorf("%w: %w", httptransport.ErrCardKept, err) }
+	card, err := d.store.CardByBrief(ctx, p.WorkspaceID, sealed.BriefID)
+	if err != nil {
+		return kept(err)
+	}
+	_, changed, err := d.store.CloseDeal(ctx, postgres.DealClose{WorkspaceID: p.WorkspaceID, Ref: deal.Ref,
+		PrincipalID: p.ID, Reason: reason, Card: card.ID})
+	switch {
+	case changed:
+		// The close committed, whatever reading the deal back gave.
+		return nil
+	case errors.Is(err, postgres.ErrNotPermitted):
+		// The grant ended between the final card and the close.
+		return kept(authz.ErrNotPermitted)
+	}
+	return kept(err)
+}
+
+// refreshed is the work of RefreshDeal: the card it published, the reads it was made through and the deal.
+func (d dealRegistry) refreshed(ctx context.Context, p authz.Principal, ref string) (*cards.Sealed, *reads, postgres.Deal, error) {
+	none := func(err error) (*cards.Sealed, *reads, postgres.Deal, error) { return nil, nil, postgres.Deal{}, err }
 	workspace, err := d.store.WorkspaceByID(ctx, p.WorkspaceID)
 	if err != nil {
-		return err
+		return none(err)
 	}
 	refuse := func(asked, account string) error {
 		if err := refuseRead(ctx, d.store, workspace, p.ID, account, strictjson.NewObject("deal", asked)); err != nil {
@@ -677,38 +714,39 @@ func (d dealRegistry) RefreshDeal(ctx context.Context, p authz.Principal, ref st
 	}
 	if !dealID.MatchString(ref) {
 		// What is no deal ID is not kept as it was sent.
-		return refuse("<invalid>", "")
+		return none(refuse("<invalid>", ""))
 	}
 	deal, err := d.store.Deal(ctx, workspace.ID, ref)
 	if errors.Is(err, postgres.ErrNotFound) {
-		return refuse(ref, "")
+		return none(refuse(ref, ""))
 	} else if err != nil {
-		return err
+		return none(err)
 	}
 	live := func(ctx context.Context) (bool, error) {
 		return d.store.HasAccountGrant(ctx, workspace.ID, p.ID, deal.AccountRef)
 	}
 	switch granted, err := live(ctx); {
 	case err != nil:
-		return err
+		return none(err)
 	case !granted:
-		return refuse(ref, deal.AccountRef)
+		return none(refuse(ref, deal.AccountRef))
 	case deal.State != "open":
-		return httptransport.ErrDealClosed
+		return none(httptransport.ErrDealClosed)
 	}
 	from, err := workspaceReads(ctx, d.store, workspace)
 	if errors.Is(err, errNotConnected) {
-		return fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
+		return none(fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err))
 	} else if err != nil {
-		return err
+		return none(err)
 	}
 	// A person signed in to the browser reads every source of an account they hold a grant on. A grant that
 	// cannot be read is not a grant that ended: the read stops, and the failure is the store's.
 	scopes := []string{"crm:read", "calls:read", "slack:read"}
 	var unread error
+	var sealed *cards.Sealed
 	err = from.open(ctx, "crm", "calls", "slack")
 	if err == nil {
-		_, err = from.publish(ctx, cards.Principal{WorkspaceID: workspace.ID, PrincipalID: p.ID,
+		sealed, err = from.publish(ctx, cards.Principal{WorkspaceID: workspace.ID, PrincipalID: p.ID,
 			TokenID: receipts.Fingerprint(randomToken()), Scopes: scopes,
 			Verify: func() ([]string, bool) {
 				granted, err := live(ctx)
@@ -723,24 +761,30 @@ func (d dealRegistry) RefreshDeal(ctx context.Context, p authz.Principal, ref st
 		told     *cards.Diagnostic
 		rejected *evidence.Rejected
 		unported *unportedSource
+		stage    *stageCloseFailed
 	)
 	switch {
 	case unread != nil:
-		return unread
-	case err == nil, errors.Is(err, receipts.ErrSourceChanged), errors.Is(err, postgres.ErrDealChanged):
-		return err
+		return none(unread)
+	case err == nil:
+		return sealed, from, deal, nil
+	case errors.As(err, &stage):
+		// The card is published; closing the deal on the CRM's stage failed.
+		return none(fmt.Errorf("%w: %w", httptransport.ErrCardKept, err))
+	case errors.Is(err, receipts.ErrSourceChanged), errors.Is(err, postgres.ErrDealChanged):
+		return none(err)
 	case errors.Is(err, cards.ErrInvalidToken), errors.Is(err, receipts.ErrNotPermitted):
 		// The grant ended while the card was read, or as it was published.
-		return authz.ErrNotPermitted
+		return none(authz.ErrNotPermitted)
 	case errors.As(err, &rejected), errors.Is(err, cards.ErrEvidenceInvalid), errors.Is(err, cards.ErrRejected):
-		return fmt.Errorf("%w: %w", httptransport.ErrNoCard, err)
+		return none(fmt.Errorf("%w: %w", httptransport.ErrNoCard, err))
 	case errors.As(err, &unported):
-		return fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
+		return none(fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err))
 	case errors.As(err, &read), errors.As(err, &told), errors.Is(err, cards.ErrBriefing),
 		errors.Is(err, cards.ErrSourceFailed):
-		return fmt.Errorf("%w: %w", httptransport.ErrSourceFailed, err)
+		return none(fmt.Errorf("%w: %w", httptransport.ErrSourceFailed, err))
 	}
-	return err
+	return none(err)
 }
 
 // refuseRegistration writes the receipt of a registration refused before any source was opened: the

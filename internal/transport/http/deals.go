@@ -26,6 +26,10 @@ var (
 	ErrDealClosed = errors.New("the deal is closed")
 	// ErrNoCard is a refresh whose evidence failed a check, so no card was made. The deal's last card stays.
 	ErrNoCard = errors.New("the evidence failed a check")
+	// ErrCardKept marks a refusal that came after the request published its card: the card stays the deal's.
+	// It wraps what stopped the request then, such as postgres.ErrDealChanged for a close that lost to a newer
+	// card or to another close.
+	ErrCardKept = errors.New("the card was published and stays")
 )
 
 // DealRegistry registers a deal for a signed-in principal: it reads the account and its opportunities
@@ -40,9 +44,16 @@ var (
 // was connected again during the read receipts.ErrSourceChanged; a deal or match that changed during it
 // postgres.ErrDealChanged; a failed read ErrSourceFailed; and evidence that fails a check ErrNoCard. None
 // of those publishes a card.
+//
+// CloseDeal closes an open deal for the principal, with their reason: it first makes the deal's final card as
+// RefreshDeal makes a card, with the same refusals, then closes the deal on that card under a close_deal
+// receipt that names the principal. A deal that got a newer card or closed meanwhile gives
+// postgres.ErrDealChanged. When the card reads the deal's opportunity as closed in the CRM, the deal closes
+// on that stage and the reason is not recorded.
 type DealRegistry interface {
 	RegisterDeal(ctx context.Context, p authz.Principal, account string) (postgres.Deal, error)
 	RefreshDeal(ctx context.Context, p authz.Principal, deal string) error
+	CloseDeal(ctx context.Context, p authz.Principal, deal, reason string) error
 }
 
 type dealView struct {
@@ -109,19 +120,26 @@ func viewDeal(d postgres.Deal) (dealView, error) {
 	return view, nil
 }
 
-// deals lists the deals the principal may read: those of the accounts it holds a live grant on.
+// deals lists the open deals the principal may read: those of the accounts it holds a live grant on. With
+// all=1 the closed ones follow.
 func (s *Server) deals(w http.ResponseWriter, r *http.Request, p authz.Principal) {
 	deals, err := s.evidence.Deals(r.Context(), p)
 	if err != nil {
 		readFailed(w, err)
 		return
 	}
-	views := make([]dealView, len(deals))
-	for i, d := range deals {
-		if views[i], err = viewDeal(d); err != nil {
+	all := r.URL.Query().Get("all") == "1"
+	views := make([]dealView, 0, len(deals))
+	for _, d := range deals {
+		if d.State != "open" && !all {
+			continue
+		}
+		view, err := viewDeal(d)
+		if err != nil {
 			internal(w)
 			return
 		}
+		views = append(views, view)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deals": views})
 }
@@ -171,7 +189,36 @@ func (s *Server) refreshDeal(w http.ResponseWriter, r *http.Request, admitted ad
 		return
 	}
 	p := authz.Principal{WorkspaceID: admitted.principal.WorkspaceID, ID: admitted.principal.ID}
-	err := s.cfg.Deals.RefreshDeal(r.Context(), p, r.PathValue("deal"))
+	s.dealWritten(w, r, p, s.cfg.Deals.RefreshDeal(r.Context(), p, r.PathValue("deal")))
+}
+
+type closeRequest struct {
+	Reason string `json:"reason"`
+}
+
+// closeDeal closes an open deal for the signed-in principal, with their reason, on a final card made as a
+// refresh makes one, and answers the deal as GET /v1/deals/{deal} gives it then. It is a write: the session's
+// CSRF token and the public origin admit it.
+func (s *Server) closeDeal(w http.ResponseWriter, r *http.Request, admitted admission) {
+	if s.cfg.Deals == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Deals are not registered here.")
+		return
+	}
+	var request closeRequest
+	if !readJSON(w, r, &request) {
+		return
+	}
+	reason, err := postgres.CloseReason(request.Reason)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_reason", "Send a reason: one line of 1 to 500 characters.")
+		return
+	}
+	p := authz.Principal{WorkspaceID: admitted.principal.WorkspaceID, ID: admitted.principal.ID}
+	s.dealWritten(w, r, p, s.cfg.Deals.CloseDeal(r.Context(), p, r.PathValue("deal"), reason))
+}
+
+// dealWritten answers a refresh or a close: the refusal, or the deal as GET /v1/deals/{deal} gives it now.
+func (s *Server) dealWritten(w http.ResponseWriter, r *http.Request, p authz.Principal, err error) {
 	switch {
 	case errors.Is(err, authz.ErrNotPermitted):
 		writeError(w, http.StatusForbidden, "not_permitted", "Not permitted.")
@@ -180,9 +227,16 @@ func (s *Server) refreshDeal(w http.ResponseWriter, r *http.Request, admitted ad
 	case errors.Is(err, receipts.ErrSourceChanged):
 		writeError(w, http.StatusConflict, "source_changed",
 			"A source was connected again while it was read. No card was published; send the request again.")
+	case errors.Is(err, ErrCardKept) && errors.Is(err, postgres.ErrDealChanged):
+		writeError(w, http.StatusConflict, "deal_changed",
+			"The deal got a newer card, or closed, after this request published its card. That card stays the deal's, "+
+				"and the deal was not closed by this request. Read the deal, and send the request again if it still applies.")
 	case errors.Is(err, postgres.ErrDealChanged):
 		writeError(w, http.StatusConflict, "deal_changed",
 			"The deal or its matches changed while the card was read. No card was published; send the request again.")
+	case errors.Is(err, ErrCardKept) && !errors.Is(err, authz.ErrNotPermitted):
+		writeError(w, http.StatusInternalServerError, "close_failed",
+			"The card was published and stays the deal's, and the deal could not be closed. Send the request again.")
 	case errors.Is(err, ErrNoCRM):
 		writeError(w, http.StatusConflict, "crm_not_connected",
 			"This workspace has no CRM the server can read. No card was published.")
