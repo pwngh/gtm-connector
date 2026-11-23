@@ -1691,7 +1691,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
     const copied = await copiedText(tab);
     if (shown !== text || copied !== text || said !== 'Copied') wrong.push(card.id);
   }
-  check(recorded.length === 90 && wrong.length === 0, `each of ${recorded.length} golden cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(recorded.length === 91 && wrong.length === 0, `each of ${recorded.length} golden cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });
@@ -2035,7 +2035,7 @@ await scenario('communications: every recorded card lists each sentence unit onc
       await tab.screenshot({path: join(options.screenshots, 'deal-communications-recorded-390.png'), fullPage: true});
     }
   }
-  check(recorded.length === 90 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
+  check(recorded.length === 91 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
     `each of ${recorded.length} golden cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
