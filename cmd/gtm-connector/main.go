@@ -139,6 +139,7 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   accounts                    search the connected CRM by account name
   brief ACCOUNT               make and print the Deal card for one account, or for its open deal
   deal ACTION                 register a deal for an account, list deals, show one, or close one
+  config ACTION               preview gtm.yaml, activate a previewed file by its revision, or show the active one
   inspect ID                  show an account, a saved card, numbers on it, or a receipt
   audit                       list the receipts of the audit log
   admit FOLDER                admit the cards and receipts a Python state folder holds
@@ -155,7 +156,7 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, deal, inspect, audit, admit, mcp, token, grant, grants, debug calls,
+demo, connect, accounts, brief, deal, config, inspect, audit, admit, mcp, token, grant, grants, debug calls,
 debug salesforce and debug slack take --json, --state-dir WORKSPACE and --help. Not in this build: every
 other debug command.
 `

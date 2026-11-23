@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -87,6 +88,12 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	if len(added.Cards) != 1 || len(added.Receipts) != len(folder.Lines) {
 		t.Fatalf("admitted %+v", added)
 	}
+	// A previewed file, activated, fills the file's two tables.
+	file := "sources:\n  crm: {kind: demo}\n"
+	_, err = f.Store.SaveConfigRevision(ctx, f.Workspace.ID, revisionOf(file), []byte(file), json.RawMessage(`{"sources":{"crm":{"kind":"demo"}}}`))
+	ok(t, err)
+	_, _, err = f.Store.ActivateConfig(ctx, f.Workspace.ID, revisionOf(file))
+	ok(t, err)
 }
 
 // A backup restores every row of every table it holds, column for column,

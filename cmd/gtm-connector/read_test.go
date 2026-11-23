@@ -22,9 +22,12 @@ func (d *demoDatabase) read(t *testing.T, tokens ...string) (code int, stdout, s
 	rest, asJSON := withoutJSON(tokens)
 	var out, errs bytes.Buffer
 	s := screen{out: &out, err: &errs, json: asJSON}
-	if rest[0] == "deal" {
+	switch rest[0] {
+	case "deal":
 		code = runDeal(ctx, rest[1:], s)
-	} else {
+	case "config":
+		code = runConfig(ctx, rest[1:], s)
+	default:
 		code = runCommand(ctx, rest[0], rest[1:], s)
 	}
 	return code, out.String(), errs.String()
