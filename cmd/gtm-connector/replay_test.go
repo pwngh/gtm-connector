@@ -36,7 +36,8 @@ import (
 var notPorted = map[string]string{}
 
 // clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
-// line that names its first and last read, which is one time when both fall in one second, and elapsed_ms.
+// line that names its first and last read, which is one time when both fall in one second, the day a
+// sentence's source was read, and elapsed_ms.
 // They are compared with exactly those values left out, and everything else as recorded. The recorder numbers
 // the times it issued in a step. The demo's card names its last read by a time the recorder had not numbered
 // in that step, so the recording holds that time as the clock wrote it, and it is left out too.
@@ -47,11 +48,14 @@ var (
 	clockTime    = regexp.MustCompile(`<time-[0-9]+>`)
 	clockReads   = regexp.MustCompile(`Sources read <time>(?: to (?:<time>|` + instant + `))?\.`)
 	clockElapsed = regexp.MustCompile(`"elapsed_ms": [0-9.e+-]+`)
+	// A sentence line names the day its source was read, before the number of the read: read 2026-11-22 [2].
+	clockDay = regexp.MustCompile(`read [0-9]{4}-[0-9]{2}-[0-9]{2} \[`)
 )
 
 // withoutClock is a normalized text with the values the clock decided left out.
 func withoutClock(text string) string {
 	text = clockReads.ReplaceAllString(clockTime.ReplaceAllString(text, "<time>"), "Sources read <time>.")
+	text = clockDay.ReplaceAllString(text, "read <day> [")
 	return clockElapsed.ReplaceAllString(text, `"elapsed_ms": <elapsed>`)
 }
 
