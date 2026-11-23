@@ -101,7 +101,6 @@ are matched to a deal of their account by time, and one that fits two deals wait
 
 - The proof route of a deal ([deal routes](api.md#deal-routes)), and on the served routes the deal list's colour, `?status=needs_attention` and what changed. A deal that binds IDs of other tools than the CRM ([one deal, one ID](api.md#one-deal-one-id)), and `deal DEAL_ID` printing the card as [working a deal](deals.md) shows.
 - A live check of the sign-in against a hosted identity provider, such as Google Workspace, Microsoft Entra ID or Okta. The sign-in is built, and has run against the invented provider of its tests and, by hand, against Dex on one machine.
-- Calls and Slack threads discovered by email, domain and channel, with one that fits deals of two accounts on neither card and both cards saying so ([setting it up](config.md#how-a-deal-gets-its-evidence)). `approval: all`, which holds every match for a person, also per source.
 - A call or thread that waits for a person, one a person rejected and one matched to another deal each saying so on the card in its own words.
 - The Deals page naming a deal by its deal ID, with the list in order of urgency and in its colours. Today the page lists accounts by name at `/deals/{account}`, with the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
@@ -116,13 +115,24 @@ trial: five real renewals, run outside the repository, with a rep given 30 secon
 find the status, the change, who said what, the commitment and the blocker. Only counts are
 recorded. The README's limit about real deals changes only then.
 
-### 2. Whole book
+### 2. One file for what you set
+
+RevOps sets the sources, the watch rule and what waits for a person in one file. The file and the
+settings that live in it are built together, so that none of them gets a temporary home that is taken
+out again.
+
+- `gtm.yaml`, previewed against the book and activated by exact revision, with the active file beside a draft on Setup ([setting it up](config.md)).
+- `approval`: `ambiguous`, or `all`, which holds every match for a person, also per source ([the matches queue](config.md#the-matches-queue)).
+- The watch rule, transcript folders and Slack channel windows, and with them calls and Slack threads discovered by email, domain and channel, with one that fits deals of two accounts on neither card and both cards saying so ([setting it up](config.md#how-a-deal-gets-its-evidence)).
+- Field mapping ([setting it up](config.md#field-mapping)).
+- `timezone`: the day a card counts from, and the day a contract ends on.
+
+### 3. Whole book
 
 RevOps covers every renewal and sees which have no current card.
 
-- `gtm.yaml`, previewed and activated by exact revision ([setting it up](config.md)).
-- Field mapping, watch rules, transcript folders, Slack channel windows, Gong and Zoom.
-- `timezone`: the day a card counts from, and the day a contract ends on. A contract's status deciding whether it sets the renewal date.
+- Gong and Zoom.
+- A contract's status deciding whether it sets the renewal date.
 - The opportunity's currency, read from the org.
 - Threads and channels of any size: today a Slack read over 100 messages is refused whole. Read live below a size the operator sets and sync in the background above it, keep every message, show a bounded set on the card, and say how far a read got. More than 100 mapped threads in a workspace.
 - A participant directory that matches speakers to contacts by email or phone first.
@@ -134,7 +144,7 @@ RevOps covers every renewal and sees which have no current card.
 - The Ops screens: Setup; on Activity, what ran across the book and whether a call is safe to retry; and on Coverage each source's state, why a deal has no current card, and the matches left off by rule ([the Ops area](config.md#the-ops-area)). A diff of any two cards of a deal.
 - Pause and resume, and one size cap on every card.
 
-### 3. Delivery
+### 4. Delivery
 
 - Sending Slack alerts and signed webhooks for the three events: the destination and its secret, retries, the delivery log, alert rules, and the Slack link summary in a configured channel. The bodies and the signature are built ([what a delivery holds](api.md#what-a-delivery-holds)), from a deal status and rule results that the rule list will give. A body names a deal by its deal ID; the recorded examples supply an account's ID in its place.
 - Tokens for scripts and assistants, each limited to selected deals, the flagged-deals feed, and the OpenAPI file. Today every client token of a workspace shares the same account grants ([security review](../SECURITY_REVIEW.md#known-limits)).
@@ -142,26 +152,26 @@ RevOps covers every renewal and sees which have no current card.
 - `setup` printing the MCP configuration for each assistant client, and the four `connect APP` forms removed with it.
 - An MCP tool that reads proof. `list_deals` and `read_deal_card` are built ([MCP](mcp.md#deals-and-their-cards)). A client is marked as tested only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
 
-### 4. Your own data
+### 5. Your own data
 
 - The push API, `POST /v1/deals/{id}/sources`, and retractions ([pushing your own data](api.md#pushing-your-own-data)).
 - A read-only view of a customer's database as a source.
 - A retention period, and deletion on request with a receipt.
 
-### 5. The council and measurement
+### 6. The council and measurement
 
 - Models that answer from the card and propose marks ([ask the council](deals.md#ask-the-council)).
 - The model, prompt and checks chosen by measurement: a benchmark score per run, judges from more than one model family, and one confirming run on held-out data.
 - Facts covered measured against a pool of confirmed facts and against a census made without model output.
 - `evaluate`, running the ten cases as a table. Two of the ten wait: a buried blocker waits for marks, and a channel over the cap waits for the channel window.
 
-### 6. Playbooks
+### 7. Playbooks
 
 - The checklist and the three playbooks, with review of one plan revision ([the checklist and playbooks](deals.md#the-checklist-and-playbooks)).
 - The work queue across a rep's deals.
 - As reps ask: stakeholders on the card, an email connector, rollups by team and rule, alert digests and quiet hours.
 
-### 7. Running it anywhere
+### 8. Running it anywhere
 
 - Docker images published with each release, and a Homebrew tap ([running it](operations.md#install)). The release of the four binaries with their checksums is built.
 - systemd and launchd templates.
