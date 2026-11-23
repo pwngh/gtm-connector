@@ -1,5 +1,5 @@
 // What the Go server sends. Each interface named after a view struct in
-// internal/transport/http/session.go or evidence.go mirrors that struct: one
+// internal/transport/http/session.go, evidence.go or matches.go mirrors that struct: one
 // field per json tag, optional where the tag says omitempty, null where the
 // Go field is a pointer. types.test.ts holds the two in step.
 
@@ -147,4 +147,35 @@ export interface Health {
 /** The body of every refusal. */
 export interface ErrorBody {
   error: {code: string; message: string};
+}
+
+/** Which deal of its account an imported call or a mapped Slack thread belongs to, as the server decided it or a person did. */
+export interface MatchView {
+  id: string;
+  kind: string;
+  item: string;
+  account: string;
+  account_name: string;
+  at: string | null;
+  candidates: string[] | null;
+  state: string;
+  deal: string | null;
+  basis: string;
+  decided_by: string | null;
+  decided_at: string;
+  supersedes: string | null;
+  receipt: string;
+  superseded: boolean;
+  stale: boolean;
+}
+
+/** A person's decision of a match: onto one deal of its account, or off every card. */
+export interface DecideRequest {
+  decision: string;
+  deal: string;
+}
+
+/** GET /v1/matches: the matches that wait for a person. */
+export interface MatchList {
+  matches: MatchView[] | null;
 }

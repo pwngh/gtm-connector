@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {ApiError} from '../../api/client.ts';
 import type {AccountView, CardView} from '../../api/types.ts';
-import {byName, cardReadLimit, dealAt, dealHref, matching, readInTurn, rowFrom} from './deals.ts';
+import {byName, cardReadLimit, dealAt, dealHref, matchesPath, matching, matchKind, matchReason, readInTurn, rowFrom, waitingLine} from './deals.ts';
 
 // The demo book's accounts, as GET /api/v1/accounts lists them: by ID, with the recorded names.
 const book = JSON.parse(readFileSync(new URL('../../../../testdata/oracle/cards/demo_book.json', import.meta.url), 'utf8')) as {
@@ -148,4 +148,18 @@ test('stopping releases the reads in flight and starts no more', () => {
   // An answer that arrives after the stop starts nothing.
   held.get('acc-001')?.();
   assert.equal(run.started.length, 4);
+});
+
+test('the line about what waits counts calls and threads, and the page that lists them is no deal', () => {
+  assert.equal(waitingLine(1), '1 call or thread waits for your OK');
+  assert.equal(waitingLine(3), '3 calls and threads wait for your OK');
+  assert.equal(matchesPath, '/deals/matches');
+  assert.equal(dealAt(matchesPath), null);
+  assert.equal(dealAt('/deals/acc-003'), 'acc-003');
+  assert.equal(matchKind('call'), 'Call');
+  assert.equal(matchKind('thread'), 'Slack thread');
+  // A basis the page does not know still says that it waits, and never shows the code as a reason.
+  assert.match(matchReason('time_unknown'), /more than one deal/);
+  assert.match(matchReason('deal_closed'), /closed/);
+  assert.equal(matchReason('something_new'), 'It waits for a person to decide.');
 });

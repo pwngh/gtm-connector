@@ -2,14 +2,30 @@ import {ArrowLeft} from 'lucide-react';
 import {type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState} from 'react';
 import {Link, useLocation, useSearchParams} from 'react-router';
 import {demoAccount, formatUtc} from '../../api/client.ts';
-import {readsFor, useRead, useServer} from '../../api/reads.ts';
-import type {AccountCards, AccountView} from '../../api/types.ts';
+import {type Read, readsFor, useRead, useServer} from '../../api/reads.ts';
+import type {AccountCards, AccountView, MatchList} from '../../api/types.ts';
 import {Button} from '../../ui/Button.tsx';
 import {Field} from '../../ui/Field.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {displayStorage} from '../../ui/theme.ts';
 import DealCard from './card/DealCard.tsx';
-import {byName, cardReadLimit, dealAt, dealHref, dealsPath, hintKey, matching, type RowRead, readInTurn, rowFrom, useMedia, wideQuery} from './deals.ts';
+import {
+  byName,
+  cardReadLimit,
+  dealAt,
+  dealHref,
+  dealsPath,
+  hintKey,
+  matchesPath,
+  matching,
+  type RowRead,
+  readInTurn,
+  rowFrom,
+  useMedia,
+  waitingLine,
+  wideQuery,
+} from './deals.ts';
+import Matches from './Matches.tsx';
 
 // Deals: every account the server grants the signed-in person, by name, each
 // with the time of its newest card. At 1100 and wider the list is a rail and
@@ -254,7 +270,38 @@ function useFilter(): [string, (value: string) => void] {
   return [text, setQuery];
 }
 
-function DealList({open, titled}: {open: string | null; titled: boolean}) {
+// The one line about calls and threads that wait for a person: their number, linking to the list of them.
+// With none waiting there is no line. A read that was refused says so, and is not shown as none.
+function Waiting({matches}: {matches: Read<MatchList>}) {
+  if (matches.status === 'failed') {
+    return (
+      <p className="deals-waiting">
+        <Link
+          className="deals-waiting__link"
+          to={matchesPath}
+        >
+          The calls and threads that wait could not be read
+        </Link>
+      </p>
+    );
+  }
+  const count = matches.status === 'ready' ? (matches.data.matches?.length ?? 0) : 0;
+  if (!count) {
+    return null;
+  }
+  return (
+    <p className="deals-waiting">
+      <Link
+        className="deals-waiting__link"
+        to={matchesPath}
+      >
+        {waitingLine(count)}
+      </Link>
+    </p>
+  );
+}
+
+function DealList({open, titled, matches}: {open: string | null; titled: boolean; matches: Read<MatchList>}) {
   const {state} = useServer();
   const [query, setQuery] = useFilter();
   const field = useRef<HTMLInputElement>(null);
@@ -367,6 +414,7 @@ function DealList({open, titled}: {open: string | null; titled: boolean}) {
           />
         </div>
       </div>
+      <Waiting matches={matches} />
       {readme && (
         <FirstRunHint
           deal={readme}
@@ -405,13 +453,25 @@ export default function Deals() {
   const {pathname} = useLocation();
   const wide = useMedia(wideQuery);
   const open = dealAt(pathname);
+  // One read of what waits, for the line above the list and for the page that lists it, so that a decision
+  // made on the page is gone from both.
+  const matches = useRead<MatchList>('matches', (api, signal) => api.matches({signal}));
+  const waiting = pathname === matchesPath;
+  const decided = () => matches.retry?.();
   if (!wide) {
     return (
       <div className="deals">
-        {open === null ? (
+        {waiting ? (
+          <Matches
+            read={matches}
+            decided={decided}
+            back
+          />
+        ) : open === null ? (
           <DealList
             open={null}
             titled
+            matches={matches}
           />
         ) : (
           <OpenDeal
@@ -427,11 +487,18 @@ export default function Deals() {
       <div className="deals-rail">
         <DealList
           open={open}
-          titled={open === null}
+          titled={open === null && !waiting}
+          matches={matches}
         />
       </div>
       <div className="deals-pane">
-        {open === null ? (
+        {waiting ? (
+          <Matches
+            read={matches}
+            decided={decided}
+            back={false}
+          />
+        ) : open === null ? (
           <p className="deals-choose">Choose a deal.</p>
         ) : (
           <OpenDeal

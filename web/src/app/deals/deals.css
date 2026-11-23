@@ -301,3 +301,88 @@
     text-align: left;
   }
 }
+
+/* The one line about calls and threads that wait for a person. */
+.deals-waiting {
+  margin: 0;
+}
+
+.deals-waiting__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font-weight: 600;
+}
+
+.deals-waiting__link:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+/* The list of what waits. */
+.matches {
+  display: grid;
+  gap: var(--gc-space-3);
+  max-width: 760px;
+}
+
+.matches-title {
+  margin: 0;
+  color: var(--gc-ink);
+}
+
+.matches-lead,
+.matches-none {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+}
+
+.matches-rows {
+  display: grid;
+  gap: var(--gc-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.matches-row {
+  display: grid;
+  gap: var(--gc-space-2);
+  padding: var(--gc-space-3);
+  border: var(--gc-rule-width) solid var(--gc-rule);
+  background: var(--gc-surface);
+}
+
+.matches-row__what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gc-space-1) var(--gc-space-3);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.matches-row__account {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.matches-row__time {
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.matches-row__why {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.matches-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gc-space-2);
+}

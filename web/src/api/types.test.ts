@@ -13,7 +13,9 @@ interface Field {
   nullable: boolean;
 }
 
-const goFiles = ['evidence.go', 'session.go'].map(name => readFileSync(new URL(`../../../internal/transport/http/${name}`, import.meta.url), 'utf8'));
+const goFiles = ['evidence.go', 'session.go', 'matches.go'].map(name =>
+  readFileSync(new URL(`../../../internal/transport/http/${name}`, import.meta.url), 'utf8'),
+);
 const typesSource = readFileSync(new URL('./types.ts', import.meta.url), 'utf8');
 
 const pascal = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);

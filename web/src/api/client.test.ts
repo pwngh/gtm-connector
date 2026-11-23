@@ -198,3 +198,31 @@ test('health takes 200 and 503 with a status as answers, and anything else as an
   await assert.rejects(api.health(), error => error instanceof ApiError && error.kind === 'not_found' && error.code === 'not_found');
   await assert.rejects(api.health(), kindOf('unreachable'));
 });
+
+test('the matches that wait are read from /v1/matches, and a decision is one POST with the CSRF token', async () => {
+  const waiting = {matches: [{id: 'm-1', kind: 'call', candidates: ['a-2026-aaaaaa', 'a-2027-aaaaaa']}]};
+  let {fetch, calls} = fakeFetch({json: waiting});
+  assert.deepEqual(await createApiClient(fetch).matches(), waiting);
+  assert.equal(calls[0]?.path, '/v1/matches');
+  assert.equal(calls[0]?.method, 'GET');
+
+  ({fetch, calls} = fakeFetch({json: {match: {id: 'm-2'}}}));
+  await createApiClient(fetch).decideMatch('token', 'm-1', 'a-2027-aaaaaa');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.path, '/v1/matches/m-1');
+  assert.equal(calls[0]?.method, 'POST');
+  assert.equal(calls[0]?.headers['X-CSRF-Token'], 'token');
+  assert.deepEqual(JSON.parse(String(calls[0]?.body)), {decision: 'match', deal: 'a-2027-aaaaaa'});
+
+  // Leaving it off every card names no deal.
+  ({fetch, calls} = fakeFetch({json: {match: {id: 'm-3'}}}));
+  await createApiClient(fetch).decideMatch('token', 'm-1', null);
+  assert.deepEqual(JSON.parse(String(calls[0]?.body)), {decision: 'reject'});
+
+  // A refusal is the server's, with its code, and is not read as a decision.
+  ({fetch} = fakeFetch(refused(409, 'match_decided')));
+  await assert.rejects(
+    createApiClient(fetch).decideMatch('token', 'm-1', null),
+    (error: unknown) => error instanceof ApiError && error.code === 'match_decided',
+  );
+});

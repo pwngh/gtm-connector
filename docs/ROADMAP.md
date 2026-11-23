@@ -60,7 +60,8 @@ HTTPS client its token, and `mcp stdio` is the command an assistant app starts.
 
 The web app the binary serves shows the deal list at `/deals`, which `/` opens, each deal's card at
 `/deals/{account}`, every sentence the card read at `/deals/{account}/communications`, its plain-text
-card at `/deals/{account}/text`, and the Ops pages Coverage and
+card at `/deals/{account}/text`, the calls and threads that wait for a person at `/deals/matches`, with
+one line above the list that counts them, and the Ops pages Coverage and
 Activity at `/ops/coverage` and `/ops/activity`, which `/ops` opens with Coverage. It shows nothing
 else after sign-in. A deal's card shows, under its title, the days to the renewal or contract end
 and the ARR line, then the card's fixed signals under Flags, what people said with each buyer's

@@ -239,6 +239,7 @@ const serverStartup = [
 // The modules the server's pages load after it.
 const serverPages = [
   'app/deals/Deals.tsx',
+  'app/deals/Matches.tsx',
   'app/ops/Coverage.tsx',
   'app/ops/coverageRows.ts',
   'app/ops/pooledReads.ts',
