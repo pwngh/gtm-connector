@@ -59,6 +59,9 @@ var backupTables = []struct {
 	// A decision is restored after the one it supersedes.
 	{"deal_matches", "decided_at, id", "deal_matches"},
 	{"deal_card_matches", "card_id, match_id", "deal_matches"},
+	// A file's revision is restored before the activation that names it.
+	{"config_revisions", "workspace_id, revision", "config_revisions"},
+	{"config_activations", "activated_at, id", "config_revisions"},
 }
 
 // TableCopy describes one table in a backup.

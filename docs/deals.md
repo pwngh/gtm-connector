@@ -44,10 +44,10 @@ one's exact condition and wording. The last five are the planned flags.
 
 | Rule | When it is raised |
 | --- | --- |
-| Still open near the renewal | An opportunity is open, and the renewal date, or on Salesforce the contract end the card counts to, is 30 days away or less, or today. On the demo CRM, also when it has passed. |
+| Still open near the renewal | An opportunity is open, and the renewal date, or on Salesforce the contract end the card counts to, is 30 days away or less, today, or past. On Salesforce, when no contract ends on or after the card's date, it counts from the latest contract that ended. |
 | Renewal passed | On the demo CRM, the renewal date is before the card's date and no opportunity is open |
-| Contract ended | On Salesforce, no contract ends on or after the card's date, and one ended before it |
-| Close date after the renewal | An open opportunity closes after the renewal date, or on Salesforce after the contract end the card counts to |
+| Contract ended | On Salesforce, no contract ends on or after the card's date, one ended before it, and no opportunity is open |
+| Close date after the renewal | An open opportunity closes after the renewal date, or on Salesforce after the contract end the first rule counts from |
 | Contact with no role | A contact has no title |
 | Stale call | The newest call that was read with a valid time, dated on or before the card's date, is more than 60 days old, counted from its UTC date |
 | CRM at risk | The demo CRM marks the account at risk. Salesforce maps no renewal risk. |

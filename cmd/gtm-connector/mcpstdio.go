@@ -38,7 +38,7 @@ var mcpArguments = arguments{options: []option{
 // clientCommands are the commands that take an action first: mcp and token for MCP clients, and deal. main
 // runs them as it runs the read commands.
 var clientCommands = map[string]func(context.Context, []string, screen) int{"mcp": runMCP, "token": runToken,
-	"deal": runDeal}
+	"deal": runDeal, "config": runConfig}
 
 // stdioLifetime is how long the process's token lasts unless it is renewed, and stdioRenewal how often it is.
 const (

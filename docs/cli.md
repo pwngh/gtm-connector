@@ -237,6 +237,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | [`accounts`](#accounts) | Object with `accounts` and `has_more`. |
 | [`brief`](#brief) | The saved card, without its evidence. |
 | [`deal`](#deal) | A deal's object, an array of them, or a deal and its newest card. |
+| [`config`](#config) | A file's description, the active file, or an array of activations. |
 | [`inspect`](#inspect) | One of four results, by the ID given. |
 | [`audit`](#audit) | Array of receipts. |
 | [`demo`](#demo) | With `--state-dir`: one invented renewal. Without it: text only. |
@@ -359,6 +360,33 @@ deal is not closed by that command, the card it made stays the deal's, and the m
 again. `deal close` of an unknown deal leaves a `close_deal` receipt, refused. `deal decide` of an unknown match, or onto a deal of another
 account, exits `2`, and of a match a later decision superseded exits `3`. Each action takes
 `--state-dir NAME`, `--json` and `--help`.
+
+### `config`
+
+`config` keeps [`gtm.yaml`](config.md#the-file-today), the one file a workspace is set by. A revision is
+the SHA-256 of the file's bytes, so the same file is the same revision on any machine.
+
+| Command | What it does |
+| --- | --- |
+| `config preview FILE` | Reads the file, stores it as a draft under its revision, and prints the revision, each source the file names with whether the workspace has it connected, and each setting this build does not apply. A file the reader refuses exits `2` with its line, as `gtm.yaml line 2: a tab; indent with spaces.`, and is not stored. A refusal says where and what was expected and repeats nothing of the file or its path. The path is a file or a link to one: a folder, a pipe or a device is refused without being read. |
+| `config activate REVISION` | Makes a previewed file the workspace's active file, under an `activate_config` receipt. It takes the whole 64 characters. A file that holds a setting this build does not apply, or names a source the workspace has not connected, exits `3` and the active file stays; a revision the workspace never stored exits `2`. Each of those refusals has its own receipt. The sources are checked as the file is activated: one detached afterwards leaves the active file as it is. Activating the active file again changes nothing. |
+| `config show [REVISION]` | Prints the active file and its revision, or a stored revision. As text, a character that does not print is written out as its code. |
+| `config history` | Lists what was active and when, newest first, each with its receipt. |
+
+```text
+$ gtm-connector config preview gtm.yaml --state-dir acme
+FIELD       VALUE
+Revision    8f3c...  (64 characters)
+Source crm  salesforce, connected
+
+Stored as a draft. Activate it: gtm-connector config activate 8f3c... --state-dir acme
+```
+
+With `--json`, `preview` and `activate` give `revision`, `sources` (each with `name`, `kind` and
+`connected`), `not_applied`, `can_activate`, `problems` and `active`. `preview` adds `stored`, whether
+the draft was new. `activate` adds `activated_at`, `receipt` and `changed`. `show` gives `revision`,
+`active`, `file` and `stored_at`, and `history` an array of `revision`, `activated_at` and `receipt`.
+Each action takes `--state-dir NAME`, `--json` and `--help`.
 
 ### `inspect`
 

@@ -119,7 +119,13 @@ RevOps sets the sources, the watch rule and what waits for a person in one file.
 settings that live in it are built together, so that none of them gets a temporary home that is taken
 out again.
 
-- `gtm.yaml`, previewed against the book and activated by exact revision, with the active file beside a draft on Setup ([setting it up](config.md)).
+Started: `config preview` reads `gtm.yaml` with a strict reader and stores it as a draft, and
+`config activate` makes a previewed file the active one by its exact revision, under a receipt. The
+file's `sources` are checked against what the workspace has connected. Every other setting is read and
+named as not applied, and a file that holds one cannot be activated ([the file today](config.md#the-file-today)).
+What is left:
+
+- The preview of a file's effect on the book, and the active file beside a draft on Setup, with activation there ([setting it up](config.md)).
 - `approval`: `ambiguous`, or `all`, which holds every match for a person, also per source ([the matches queue](config.md#the-matches-queue)).
 - The watch rule, transcript folders and Slack channel windows, and with them calls and Slack threads discovered by email, domain and channel, with one that fits deals of two accounts on neither card and both cards saying so ([setting it up](config.md#how-a-deal-gets-its-evidence)).
 - Field mapping ([setting it up](config.md#field-mapping)).

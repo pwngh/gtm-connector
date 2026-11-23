@@ -6,7 +6,8 @@ What RevOps and GTM engineers set lives in one file, `gtm.yaml`, apart from the 
 which stay on the workspace. The file is kept in Git, previewed against the book, and activated by
 exact revision. It holds no credential.
 
-This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built.
+This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built, and
+[the file today](#the-file-today) says what a file may hold in this build.
 
 ```yaml
 sources:
@@ -25,6 +26,28 @@ timezone: America/Chicago
 
 The speaker settings are the seller list, the aliases and your company's domains. They are set on
 the workspace with `connect` ([the CLI](cli.md#speaker-settings)).
+
+## The file today
+
+`config preview FILE` reads the file, stores it as a draft and says what it would set, and
+`config activate REVISION` makes a previewed file the active one ([the CLI](cli.md#config)). A revision
+is the SHA-256 of the file's bytes. An activation gets a receipt, and the files that were active stay
+readable with `config history` and `config show`.
+
+- **The reader is strict.** It takes the YAML this page shows: mappings indented by two spaces, a mapping
+  or a list on one line in braces or brackets, text with or without quotes, whole numbers, `true` and
+  `false`, and `#` comments. It refuses an anchor, a tag, a second document, a list written over several
+  lines, a tab, a character that does not print and a key given twice, each with its line. A word stays
+  a word: `no` is not false. A key this page does not give is an error. A refusal says what was expected
+  and repeats nothing of the file. A file is at most 65,536 bytes and holds no credential.
+- **A build applies what it reads, or says it does not.** This build checks `sources`: each entry's
+  `kind` is `demo`, `salesforce`, `slack` or `transcripts`, and must be one the workspace has connected
+  with [`connect`](cli.md#connect-the-sources) when the file is activated. The file records them; what
+  a card reads still follows `connect`. Every other setting on this page is read, checked for its form
+  and named as not applied: `approval`, `watch`, `rules`, `timezone`, a source's `channels`, `folder`, `view`
+  and `approval`, and the kinds `gong`, `push` and `sql`. A file that holds one can be previewed and
+  cannot be activated, so no setting is ever accepted and then ignored.
+- **A workspace with no active file runs on the defaults.**
 
 ## How a deal gets its evidence
 
@@ -107,8 +130,8 @@ card until a person decides it, through `GET /v1/matches` and `POST /v1/matches/
 API](api.md#matches)) or `deal matches` and `deal decide` ([the CLI](cli.md#deal)). A person puts it on
 one deal of its account, or keeps it off every card.
 
-The design adds a setting for a team that wants a person to confirm more. It is not built: there is no
-`gtm.yaml` yet.
+The design adds a setting for a team that wants a person to confirm more. It is not built: the file
+reads `approval` and this build does not apply it ([the file today](#the-file-today)).
 
 | `approval` in `gtm.yaml` | What waits for a person |
 | --- | --- |
