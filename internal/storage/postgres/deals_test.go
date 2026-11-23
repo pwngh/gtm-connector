@@ -642,3 +642,50 @@ func TestACommittedCloseIsReportedAsOne(t *testing.T) {
 		t.Errorf("the deal: %+v %v", stored, err)
 	}
 }
+
+// A rule reads the tables of its own schema. A writer's temporary table named receipts does not stand in
+// for the receipts: here it holds the close's receipt with another reason, and the close that names that
+// reason is still refused.
+func TestARuleDoesNotReadATemporaryTableInARealOnesPlace(t *testing.T) {
+	f := postgrestest.New(t)
+	deal := postgrestest.RegisterDeal(t, f, postgrestest.Account, "", "invented")
+	real := closeReceipt(t, f, deal, "Renewed", "")
+	conn, err := pgx.Connect(ctx, f.URL)
+	ok(t, err)
+	defer conn.Close(ctx)
+	for _, statement := range []string{
+		`CREATE TEMP TABLE receipts (LIKE public.receipts)`,
+		`INSERT INTO receipts SELECT * FROM public.receipts WHERE id = '` + real.ID + `'`,
+		`UPDATE receipts SET arguments = jsonb_set(arguments::jsonb, '{reason}', '"Lost"')::json`,
+	} {
+		if _, err := conn.Exec(ctx, statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_, err = conn.Exec(ctx, `UPDATE deals SET state = 'closed', closed_at = now(), close_basis = 'person',
+		close_reason = 'Lost', close_receipt_id = $3 WHERE workspace_id = $1 AND ref = $2`, f.Workspace.ID, deal.Ref, real.ID)
+	if err == nil || !strings.Contains(err.Error(), "is not closed as its receipt names") {
+		t.Errorf("a close on the word of a temporary table: %v", err)
+	}
+	// Every function of the schema that is not declared immutable carries this path, with temporary tables
+	// last. One added without it, or with another path, fails here: a path that leaves pg_temp out still has
+	// temporary tables searched first.
+	path := "search_path=pg_catalog, " + scalar(t, f.URL, `SELECT quote_ident(current_schema())`) + ", pg_temp"
+	rows, err := conn.Query(ctx, `SELECT p.oid::regprocedure::text FROM pg_proc p
+		JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = current_schema() AND p.proname LIKE 'gtm\_%' AND p.provolatile <> 'i'
+		  AND NOT coalesce(p.proconfig, '{}') @> ARRAY[$1]
+		ORDER BY 1`, path)
+	ok(t, err)
+	bare, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	ok(t, err)
+	if len(bare) != 0 {
+		t.Errorf("these functions read tables along the session's path; give each SET search_path: %v", bare)
+	}
+	var carrying int
+	ok(t, conn.QueryRow(ctx, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname = current_schema() AND p.proname LIKE 'gtm\_%' AND p.proconfig @> ARRAY[$1]`, path).Scan(&carrying))
+	if carrying < 30 {
+		t.Errorf("%d functions carry a path; the schema has more rules than that", carrying)
+	}
+}
