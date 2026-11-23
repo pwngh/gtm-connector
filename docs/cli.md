@@ -363,7 +363,8 @@ account, exits `2`, and of a match a later decision superseded exits `3`. Each a
 ### `inspect`
 
 `inspect` takes one of four IDs. The account form reads the CRM. The other three read only the cards
-and receipts the workspace has saved, and write nothing.
+and receipts the workspace has saved, and write nothing, with one exception: a card that fails its
+check leaves a `verify_card` receipt ([a card that fails its seal](cards.md#a-card-that-fails-its-seal)).
 
 | Form | Shows |
 | --- | --- |

@@ -106,7 +106,7 @@ are matched to a deal of their account by time, and one that fits two deals wait
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
 - Every call of a deal, whole. Today a card reads at most one imported excerpt per account, and a deal's card only when the excerpt is matched to that deal: up to 20 lines or cues unless a range is given, and at most 256 with the lines or cues beside them ([call transcripts](sources.md#how-a-file-is-read)).
 - On Salesforce, the still-open and close-date signals counted against a contract that has ended ([signals](cards.md#signals)).
-- A receipt when a card fails its seal.
+- A receipt when the web app's own seal check fails. `inspect` and `deal show` leave one, and `/healthz` counts them; the browser's check of a card's bytes leaves none.
 - Underneath: a Slack message keeps one identity across reads, and an import stays readable after a parser upgrade.
 
 Before real people sign in, the security review is redone for more than one person. Then the

@@ -52,6 +52,8 @@ func (noSessions) MigrationState(context.Context) (postgres.MigrationState, erro
 	return postgres.MigrationsCurrent, nil
 }
 
+func (noSessions) FailedCardChecks(context.Context) (int, error) { return 0, nil }
+
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 
 func webDir(t *testing.T) string {

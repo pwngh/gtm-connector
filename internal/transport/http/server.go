@@ -80,6 +80,7 @@ type Sessions interface {
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
 	MigrationState(ctx context.Context) (postgres.MigrationState, error)
+	FailedCardChecks(ctx context.Context) (int, error)
 }
 
 // Server is the browser surface.
@@ -358,7 +359,8 @@ func (s *Server) checkOrigin(r *http.Request) (code, message string) {
 }
 
 // healthz answers ok when the database answers and its applied migrations
-// are this binary's. Otherwise it answers 503 with one of four fixed
+// are this binary's, with how many stored cards failed their check in the
+// last 24 hours. Otherwise it answers 503 with one of four fixed
 // statuses, never with the error, which can name the database:
 // migrations_behind, migrations_ahead and migrations_changed are the states
 // serve refuses to start on, and database_unavailable is no answer.
@@ -377,7 +379,18 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	default:
 		status = "migrations_" + string(state)
 	}
-	writeJSON(w, code, map[string]string{"status": status})
+	answer := map[string]any{"status": status}
+	if code == http.StatusOK {
+		// How many checks of a stored card failed in the last day, in any workspace: a number, and nothing of
+		// which card or whose. A count the database does not give is no healthy answer.
+		failed, err := s.sessions.FailedCardChecks(ctx)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "database_unavailable"})
+			return
+		}
+		answer["failed_card_checks_24h"] = failed
+	}
+	writeJSON(w, code, answer)
 }
 
 type apiError struct {

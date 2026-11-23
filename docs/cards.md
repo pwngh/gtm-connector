@@ -510,6 +510,8 @@ literal on one line. The last `NOT READ` line counts what was replaced, such as
 
 `inspect` on an account the CRM does not hold exits 2 with `account not found: ID`.
 
+### A card that fails its seal
+
 A card that fails its seal exits 2 with one of these messages:
 
 | Message | Meaning |
@@ -521,6 +523,14 @@ A card that fails its seal exits 2 with one of these messages:
 | `This card was read from sources this folder is not bound to.` | The workspace was connected to other sources since. |
 | `A number on this card does not resolve to a record and a receipt of its own card.` | A unit does not resolve. |
 | `invalid saved brief evidence` | The bytes are not a card. |
+
+Each such refusal by `inspect` or `deal show` leaves a `verify_card` receipt for the card's account and
+brief, finished as error/409 with what failed: `seal_pending`, `seal_changed`, `seal_unread`,
+`reads_changed`, `number_unresolved` or `card_invalid`. So a failed card is on record, and not known to
+its reader alone. A card read from sources the workspace is no longer bound to is refused without one:
+the card did not fail, the workspace changed. When the receipt itself cannot be written, the refusal
+stands and a line on stderr says the failure is not on record. `/healthz` counts the failed checks of the last 24 hours
+([running it](operations.md#health)).
 
 A brief an assistant prepared with `prepare_renewal_brief` is read back with `read_renewal_brief`,
 not `inspect`, which refuses it with exit 2. [MCP](mcp.md) has those tools.

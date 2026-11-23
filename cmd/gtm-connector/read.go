@@ -678,10 +678,20 @@ func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) 
 	if err != nil {
 		return nil, err
 	}
+	// A card that fails its check leaves a receipt, so that it is not known to its reader alone. When the
+	// receipt cannot be written the refusal stands as it is, and a line says the failure is not on record.
+	failed := func(err error) error {
+		if code := sealFailure(err); code != "" {
+			if r.store.RecordSealFailure(ctx, r.workspace.ID, "", stored.AccountRef, brief, code) != nil {
+				r.announce("This failed check could not be recorded in the audit log.")
+			}
+		}
+		return refused("%s", err)
+	}
 	value, err := strictjson.Loads(stored.Bytes)
 	card, _ := value.(*strictjson.Object)
 	if err != nil || card == nil {
-		return nil, refused("%s", cards.ErrInvalidCard)
+		return nil, failed(cards.ErrInvalidCard)
 	}
 	if get(card, "kind") == "selected_brief" {
 		return nil, errPreparedBrief
@@ -691,9 +701,30 @@ func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) 
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, refused("%s", err)
+		return nil, failed(err)
 	}
 	return card, nil
+}
+
+// sealFailure is the code of a failed check of a stored card, for its receipt, or "" for a refusal that is no
+// failure of the card: one read from sources the workspace is no longer bound to, or one saved before cards
+// were sealed.
+func sealFailure(err error) string {
+	switch {
+	case errors.Is(err, cards.ErrSealPending):
+		return "seal_pending"
+	case errors.Is(err, cards.ErrNotSealed):
+		return "seal_changed"
+	case errors.Is(err, cards.ErrSealUnread):
+		return "seal_unread"
+	case errors.Is(err, cards.ErrReads):
+		return "reads_changed"
+	case errors.Is(err, cards.ErrUnresolved):
+		return "number_unresolved"
+	case errors.Is(err, cards.ErrInvalidCard):
+		return "card_invalid"
+	}
+	return ""
 }
 
 // replaced is whether a speaker label holds what neutralizing can put there: a bracketed mention, user,

@@ -29,6 +29,8 @@ func (s schema) MigrationState(context.Context) (postgres.MigrationState, error)
 	return s.state, s.err
 }
 
+func (schema) FailedCardChecks(context.Context) (int, error) { return 0, nil }
+
 // serveFor serves sessions as serve does, on a free loopback port with new
 // credentials, and sets this process's environment to that install.
 func serveFor(t *testing.T, sessions httptransport.Sessions) {
