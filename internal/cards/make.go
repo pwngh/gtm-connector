@@ -45,6 +45,15 @@ var ErrNotSelected = errors.New("cards: no selection for this account in this so
 // to the deal the card is read for. The read finishes as error/200 and the card states it.
 var ErrNotMatched = errors.New("cards: the account's item in this source is not matched to the card's deal")
 
+// ErrItemWaiting, ErrItemRejected and ErrItemOtherDeal are ErrNotMatched with its reason, which the card
+// states in its own words: the item waits for a person, a person kept it off every card, or it is matched to
+// another deal of the account.
+var (
+	ErrItemWaiting   = fmt.Errorf("%w: it waits for a person", ErrNotMatched)
+	ErrItemRejected  = fmt.Errorf("%w: a person kept it off every card", ErrNotMatched)
+	ErrItemOtherDeal = fmt.Errorf("%w: it is matched to another deal", ErrNotMatched)
+)
+
 // ErrOtherWorkspace is a read through a source that states another workspace than the caller's.
 var ErrOtherWorkspace = errors.New("cards: the source reads another workspace than the caller's")
 
@@ -437,6 +446,12 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
+	case errors.Is(readErr, ErrItemWaiting):
+		return nil, nil, nil, "waiting", finish(receipts.NotSelected())
+	case errors.Is(readErr, ErrItemRejected):
+		return nil, nil, nil, "rejected", finish(receipts.NotSelected())
+	case errors.Is(readErr, ErrItemOtherDeal):
+		return nil, nil, nil, "other_deal", finish(receipts.NotSelected())
 	case errors.Is(readErr, ErrNotMatched):
 		return nil, nil, nil, "not_matched", finish(receipts.NotSelected())
 	case errors.Is(readErr, ErrSourcePanicked):
@@ -541,11 +556,12 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 			continue
 		case outcome == "not_selected":
 			return c, &ReadError{Tool: p.tool}
-		case outcome == "not_matched" && (p.tool == "read_call_notes" && m.Sources.CallsBackend == "imported" ||
+		case evidence.Unmatched(outcome) && (p.tool == "read_call_notes" && m.Sources.CallsBackend == "imported" ||
 			p.tool == "read_slack_messages" && m.Sources.SlackBackend == "slack"):
-			*status = "not_matched"
+			// The card states why the item is not on it: the outcome is the status.
+			*status = outcome
 			continue
-		case outcome == "not_matched":
+		case evidence.Unmatched(outcome):
 			return c, &ReadError{Tool: p.tool}
 		}
 		for _, v := range bound {

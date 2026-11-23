@@ -490,12 +490,12 @@ func validate(evidence *strictjson.Object) validated {
 	notesStatus, slackStatus := field(evidence, "notes_status"), field(evidence, "slack_status")
 	if !oneOf(crm, "sqlite", "salesforce") || !oneOf(calls, "fixture", "imported", "none") ||
 		!oneOf(slack, "fixture", "slack", "none") ||
-		!oneOf(notesStatus, "available", "denied", "not_connected", "not_matched") ||
-		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected", "not_matched") ||
+		!oneOf(notesStatus, "available", "denied", "not_connected") && !Unmatched(notesStatus) ||
+		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected") && !Unmatched(slackStatus) ||
 		(calls == "none") != (notesStatus == "not_connected") ||
 		(slack == "none") != (slackStatus == "not_connected") ||
 		slackStatus == "not_selected" && slack != "slack" ||
-		notesStatus == "not_matched" && calls != "imported" || slackStatus == "not_matched" && slack != "slack" {
+		Unmatched(notesStatus) && calls != "imported" || Unmatched(slackStatus) && slack != "slack" {
 		reject("Evidence names an unknown source or outcome.")
 	}
 	salesforce, imported := crm == "salesforce", calls == "imported"
@@ -508,7 +508,7 @@ func validate(evidence *strictjson.Object) validated {
 		}
 	}
 	withCalls := calls != "none"
-	withSlack := oneOf(slackStatus, "available", "denied", "not_selected", "not_matched")
+	withSlack := oneOf(slackStatus, "available", "denied", "not_selected") || Unmatched(slackStatus)
 	liveSlack := withSlack && slack == "slack"
 	crmBinding, callsBinding := field(evidence, "crm_binding"), field(evidence, "calls_binding")
 	if imported && (!ValidBinding(callsBinding, "crm_backend", crm.(string)) || !equal(crmBinding, callsBinding)) {
@@ -662,8 +662,8 @@ func validate(evidence *strictjson.Object) validated {
 		}
 		denied := toolName == "read_call_notes" && notesStatus == "denied" ||
 			toolName == "read_slack_messages" && slackStatus == "denied"
-		unselected := toolName == "read_slack_messages" && oneOf(slackStatus, "not_selected", "not_matched") ||
-			toolName == "read_call_notes" && notesStatus == "not_matched" ||
+		unselected := toolName == "read_slack_messages" && (slackStatus == "not_selected" || Unmatched(slackStatus)) ||
+			toolName == "read_call_notes" && Unmatched(notesStatus) ||
 			toolName == "list_users" && usersStatus == UsersNotRead
 		status, code := "ok", 200
 		switch {
@@ -768,4 +768,12 @@ func FixtureCRMBinding() *strictjson.Object {
 		panic(err)
 	}
 	return strictjson.NewObject("schema_version", 1, "crm_backend", "sqlite", "identity_sha256", digest(canonical))
+}
+
+// Unmatched is whether a source's status says the account's call or thread was not read because it is not
+// matched to the card: not_matched, or one of the three that say why. waiting is an item that waits for a
+// person, rejected one a person kept off every card, and other_deal one matched to another deal of the
+// account. A card made before the reasons were kept holds not_matched.
+func Unmatched(status any) bool {
+	return oneOf(status, "not_matched", "waiting", "rejected", "other_deal")
 }

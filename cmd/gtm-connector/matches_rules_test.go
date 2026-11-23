@@ -41,7 +41,7 @@ func TestARejectedCallReachesNoCard(t *testing.T) {
 	d.result(t, &deal, "deal", "close", deal.ID, "--reason", "Renewed", "--no-card")
 	code, stdout, stderr := d.read(t, "brief", "acc-007")
 	if code != 0 || strings.Contains(stdout, "We will sign soon.") ||
-		!strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
+		!strings.Contains(stdout, "Calls: not read. A person kept the account's transcript off every card.\n") {
 		t.Fatalf("the account's card after the rejection: exit %d\n%s%s", code, stdout, stderr)
 	}
 	p := startStdio(t, d, "--scope", "calls:read")
