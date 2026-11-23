@@ -16,8 +16,8 @@
    "records": 78
   },
   "cards/books_salesforce.jsonl.gz": {
-   "sha256": "da9b9ca42a428adc1b7fed50b9bee5346648f90ff1bdbb2e4a889a251eea142f",
-   "bytes": 430407,
+   "sha256": "937d96badaf94266d689af31f90de99a5efffbcc5ffbfdd34685118f1e869dad",
+   "bytes": 470719,
    "records": 78
   },
   "cards/books_slack.jsonl.gz": {

@@ -476,7 +476,7 @@ test('every golden card with lines: the countdown is the typed days and date wit
       assert.doesNotMatch(arrHtml, /dc-focal__number|aria-label="Source/, `${at}: and no figure stands in`);
     }
   }
-  assert.deepEqual(seen, {counted: 62, passed: 4, contractEnd: 3, missing: 1, arr: 59, unmapped: 4});
+  assert.deepEqual(seen, {counted: 62, passed: 4, contractEnd: 3, missing: 2, arr: 59, unmapped: 5});
 });
 
 test('a card with no renewal line shows No renewal date and no number', () => {
@@ -578,7 +578,7 @@ test('the fixed signals are the first lines of Flags, each with its numbers; a c
     );
     assert.ok(html.indexOf('dc-flags') < html.indexOf('dc-ledger'), `${file} ${key}: Flags comes before the ledger`);
   }
-  assert.equal(flagged, 30);
+  assert.equal(flagged, 31);
 });
 
 test('lines that are not a line’s shape are not read, and the card says where its values are', () => {

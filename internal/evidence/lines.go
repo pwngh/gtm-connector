@@ -471,6 +471,19 @@ func what(s string) (string, bool) {
 
 // when reads how far off the renewal is, as a signal says it, off the front of s, and whether it has passed.
 func when(s string) (rest string, passed, ok bool) {
+	// On Salesforce, when every contract has ended, the signal counts from the latest one and names its day.
+	if rest, lapsed := strings.CutPrefix(s, "The latest contract end date, "); lapsed {
+		if rest, ok = cutDay(rest); ok {
+			rest, ok = strings.CutPrefix(rest, ", passed ")
+		}
+		if ok {
+			rest, ok = cutDays(rest)
+		}
+		if ok {
+			rest, ok = strings.CutPrefix(rest, " ago")
+		}
+		return rest, true, ok
+	}
 	if rest, ok = strings.CutPrefix(s, "The "); ok {
 		rest, ok = what(rest)
 	}

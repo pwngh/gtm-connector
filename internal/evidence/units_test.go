@@ -14,7 +14,7 @@ import (
 // seals. The other rows of a family hold inputs alone; internal/cards builds them and checks their
 // properties.
 var rebuilt = map[string]int{
-	"demo": 33, "books_demo": 7, "varied_demo": 7, "cases": 19, "books_calls": 12, "books_salesforce": 4,
+	"demo": 33, "books_demo": 7, "varied_demo": 7, "cases": 19, "books_calls": 12, "books_salesforce": 5,
 	"books_slack": 2, "slack_threads": 6,
 }
 

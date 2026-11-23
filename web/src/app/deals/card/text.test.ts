@@ -89,7 +89,7 @@ test('for every golden card the Text tab holds the sealed text byte for byte, as
     assert.equal(plain(html), sealed.text, `${sealed.file} ${sealed.key}`);
     compared += 1;
   }
-  assert.equal(compared, 90);
+  assert.equal(compared, 91);
 });
 
 test('the Text tab has the copy button and an empty status line, and none of the card tab', () => {

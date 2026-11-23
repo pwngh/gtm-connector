@@ -104,7 +104,6 @@ are matched to a deal of their account by time, and one that fits two deals wait
 - The Deals page naming a deal by its deal ID, with the list in order of urgency and in its colours. Today the page lists accounts by name at `/deals/{account}`, with the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
 - Every call of a deal, whole. Today a card reads at most one imported excerpt per account, and a deal's card only when the excerpt is matched to that deal: up to 20 lines or cues unless a range is given, and at most 256 with the lines or cues beside them ([call transcripts](sources.md#how-a-file-is-read)).
-- On Salesforce, the still-open and close-date signals counted against a contract that has ended ([signals](cards.md#signals)).
 - A receipt when the web app's own seal check fails. `inspect` and `deal show` leave one, and `/healthz` counts them; the browser's check of a card's bytes leaves none.
 - Underneath: a Slack message keeps one identity across reads, and an import stays readable after a parser upgrade.
 

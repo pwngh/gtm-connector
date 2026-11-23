@@ -198,7 +198,7 @@ func TestNoRecordedCardLeaksIntoABody(t *testing.T) {
 			}
 		}
 	}
-	if cards != 90 {
-		t.Errorf("%d golden cards, want 90", cards)
+	if cards != 91 {
+		t.Errorf("%d golden cards, want 91", cards)
 	}
 }

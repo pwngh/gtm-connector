@@ -582,6 +582,10 @@ func (c *card) crm(asOf time.Time) []contact {
 	var daysLeft *int
 	var renewalDay *time.Time
 	renewalNumbers := []int{first}
+	// signalNumbers are the units the still-open and close-date signals count from. They are the renewal's,
+	// except on Salesforce when every contract has ended and an opportunity is still open: the signals then
+	// count from the latest contract that ended, while the contract end's own line stays missing.
+	var signalNumbers []int
 	if salesforce {
 		type dated struct {
 			end      time.Time
@@ -630,8 +634,21 @@ func (c *card) crm(asOf time.Time) []contact {
 						last = d
 					}
 				}
-				c.signal("contract_ended", fmt.Sprintf("The latest contract end date, %s, was %s ago.", isoDay(last.end),
-					days(daysBetween(asOf, last.end))), 0, contractNumbers[last.id])
+				stillOpen := false
+				for _, row := range opportunities {
+					if closed, says := field(row, "is_closed").(bool); says && !closed {
+						stillOpen = true
+					}
+				}
+				if stillOpen {
+					// An opportunity is open past the last contract's end: the still-open signal says how long
+					// ago that was, and the close-date signal counts from it.
+					daysLeft, renewalDay = intp(daysBetween(last.end, asOf)), &last.end
+					signalNumbers = []int{contractNumbers[last.id]}
+				} else {
+					c.signal("contract_ended", fmt.Sprintf("The latest contract end date, %s, was %s ago.", isoDay(last.end),
+						days(daysBetween(asOf, last.end))), 0, contractNumbers[last.id])
+				}
 			}
 		}
 		c.gap("crm_unmapped_fields", "CRM: annual recurring revenue and renewal risk are not mapped "+
@@ -763,9 +780,17 @@ func (c *card) crm(asOf time.Time) []contact {
 	if salesforce {
 		what = "contract end"
 	}
+	// lapsed: the signals count from the latest contract that ended, and name its date, which no other line
+	// of the card's head gives.
+	lapsed := signalNumbers != nil
+	if !lapsed {
+		signalNumbers = renewalNumbers
+	}
 	when := ""
 	if daysLeft != nil {
 		switch {
+		case lapsed:
+			when = "The latest contract end date, " + isoDay(*renewalDay) + ", passed " + days(-*daysLeft) + " ago"
 		case *daysLeft == 0:
 			when = "The " + what + " is today"
 		case *daysLeft > 0:
@@ -783,16 +808,16 @@ func (c *card) crm(asOf time.Time) []contact {
 	}
 	switch {
 	case daysLeft != nil && *daysLeft < 0 && len(stillOpen) == 0:
-		c.signal("renewal_passed", when+".", 0, renewalNumbers...)
+		c.signal("renewal_passed", when+".", 0, signalNumbers...)
 	case len(stillOpen) > ShownRecords:
 		c.signal("still_open", fmt.Sprintf("%s and %d opportunities are still open.", when, len(stillOpen)),
 			len(stillOpen)-ShownRecords,
-			append(append([]int(nil), renewalNumbers...), numbersOf(stillOpen[:ShownRecords], opportunityNumbers)...)...)
+			append(append([]int(nil), signalNumbers...), numbersOf(stillOpen[:ShownRecords], opportunityNumbers)...)...)
 	default:
 		for _, row := range stillOpen {
 			c.signal("still_open", fmt.Sprintf("%s and this opportunity is still open at stage %s.", when,
 				c.quoted(field(row, "stage"))), 0,
-				append(append([]int(nil), renewalNumbers...), opportunityNumbers[rowID(row)])...)
+				append(append([]int(nil), signalNumbers...), opportunityNumbers[rowID(row)])...)
 		}
 	}
 	var late []*strictjson.Object
@@ -809,12 +834,12 @@ func (c *card) crm(asOf time.Time) []contact {
 		c.signal("close_after_renewal", fmt.Sprintf("%d open opportunities have a close date after the %s date, %s.",
 			len(late), what,
 			renewalText), len(late)-ShownRecords,
-			append(append([]int(nil), renewalNumbers...), numbersOf(late[:ShownRecords], opportunityNumbers)...)...)
+			append(append([]int(nil), signalNumbers...), numbersOf(late[:ShownRecords], opportunityNumbers)...)...)
 	} else {
 		for _, row := range late {
 			c.signal("close_after_renewal", fmt.Sprintf("This open opportunity's close date, %s, is after the %s date, %s.",
 				str(field(row, "close_date")), what, renewalText), 0,
-				append(append([]int(nil), renewalNumbers...), opportunityNumbers[rowID(row)])...)
+				append(append([]int(nil), signalNumbers...), opportunityNumbers[rowID(row)])...)
 		}
 	}
 	var noRole []*strictjson.Object
