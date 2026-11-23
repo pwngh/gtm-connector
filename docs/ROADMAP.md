@@ -163,11 +163,17 @@ RevOps covers every renewal and sees which have no current card.
 - The model, prompt and checks chosen by measurement: a benchmark score per run, judges from more than one model family, and one confirming run on held-out data.
 - Facts covered measured against a pool of confirmed facts and against a census made without model output.
 - `evaluate`, running the ten cases as a table. Two of the ten wait: a buried blocker waits for marks, and a channel over the cap waits for the channel window.
+- A model's proposal kept apart from what a person authorizes: a model gets no tool that approves or carries out work, and a citation that resolves shows only that the source exists, so review and measurement cover the reading too.
+- A comparison of three on the same scenarios: the card's own order, a plain search-and-rule baseline, and the model. Scenarios are split into a development set and a held-out set by family, with answers written apart from any model. It reports the conditions found, the readings no source supports, the qualifications missed, abstaining when right and when not needed, the wrong answers a reviewer accepted, the reviewer's time, and the cost. The baseline wins where it does.
 
 ### 7. Playbooks
 
 - The checklist and the three playbooks, with review of one plan revision ([the checklist and playbooks](deals.md#the-checklist-and-playbooks)).
 - The work queue across a rep's deals.
+- The opportunity's owner read from the CRM, so that a work item's assignee is never taken from a speaker's name.
+- The review of a plan revision binding the assignee and the deadline too, beside the plan and the evidence it cites, so that a change to any of them reopens it.
+- One identity for a work item across model runs, approvals and deliveries: a repeated request returns the same item, and a changed one never reuses an earlier approval.
+- An operating view of the work: what is open, what failed and why, the review decisions and the handoffs still pending, with every number taken from recorded activity.
 - As reps ask: stakeholders on the card, an email connector, rollups by team and rule, alert digests and quiet hours.
 
 ### 8. Running it anywhere
