@@ -139,6 +139,20 @@ func TestMountedDealCard(t *testing.T) {
 	if got := records(t, response); !reflect.DeepEqual(got, []string{"deals/" + other.Ref, "deals/" + deal.Ref}) {
 		t.Fatalf("list_deals without a selection: %v", got)
 	}
+	// A closed deal leaves the list and the list's receipt, and is still read by its ID.
+	if _, _, err := m.store.CloseDeal(ctx, postgres.DealClose{WorkspaceID: m.workspace.ID, Ref: other.Ref,
+		Reason: "Renewed"}); err != nil {
+		t.Fatal(err)
+	}
+	response, row = m.call(7, "list_deals", map[string]any{}, read)
+	if got := records(t, response); !reflect.DeepEqual(got, []string{"deals/" + deal.Ref}) || !reflect.DeepEqual(row.Rows, got) {
+		t.Fatalf("list_deals after a deal closed: %v, receipt %v", got, row.Rows)
+	}
+	response, row = m.call(8, "read_deal_card", map[string]any{"deal_id": other.Ref}, read)
+	if content := structured(t, response.Body.Bytes()); at(content, "deal", "state") != "closed" ||
+		len(row.Rows) == 0 || row.Rows[0] != "deals/"+other.Ref {
+		t.Fatalf("read_deal_card of a closed deal: %s", response.Body)
+	}
 	// The card read Slack, so a selection that leaves the account's Slack out releases no card.
 	m.serve(cards.Selection{"acc-003": false}, nil)
 	if response, row := m.call(6, "read_deal_card", map[string]any{"deal_id": deal.Ref}, read); toolError(t, response) != "slack_not_selected" ||

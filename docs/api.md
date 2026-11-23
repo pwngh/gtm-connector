@@ -88,10 +88,11 @@ not published during, and a restore checks the same.
 
 | Route | What it does | Today |
 | --- | --- | --- |
-| `GET /v1/deals` | Lists the deals you may read, with their colour. `?status=needs_attention` keeps the flagged ones. | Served, without the colour or the filter |
+| `GET /v1/deals` | Lists the open deals you may read, with their colour. `?status=needs_attention` keeps the flagged ones, and `?all=1` adds the closed ones. | Served, without the colour or the `status` filter |
 | `POST /v1/deals` | Registers a deal and binds its IDs | Served, for an account of the CRM |
 | `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed | Served, without what changed |
 | `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand | Served |
+| `POST /v1/deals/{id}/close` | Closes the deal, with a reason, on a final card | Served |
 | `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt | Not built |
 | `GET /v1/matches` | Lists the matches waiting for a person ([matches](#matches)) | Served |
 | `POST /v1/matches/{id}` | Decides one match: onto one deal of its account, or onto none | Served |
@@ -110,7 +111,7 @@ leaves it out.
 
 | Route | Answer |
 | --- | --- |
-| `GET /v1/deals` | `{"deals": [DEAL, ...]}`, the open deals first, each group by ID |
+| `GET /v1/deals` | `{"deals": [DEAL, ...]}`, the open deals by ID. With `?all=1` the closed deals follow them, by ID. |
 | `POST /v1/deals` with `{"account": "acc-003"}` | `201` and `{"deal": DEAL}` |
 | `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` or a refresh has made one. `matches` are the matches of the calls and threads that card read. |
 | `POST /v1/deals/{id}/refresh`, with no body | `200` and the deal as `GET /v1/deals/{id}` gives it then: with the card this refresh published, unless another refresh finished after it |
@@ -136,8 +137,8 @@ card is published for the deal: by `brief`, by a refresh, or as a brief an assis
  "receipt": "RECEIPT_ID", "final_card": "CARD_ID"}
 ```
 
-`reason` is the person's own words, neutralized as source text is. `closed_by` is `null` for the owner,
-who closes with `deal close`. `receipt` is the `close_deal` receipt, which
+`reason` is the person's own words, neutralized as source text is. `closed_by` is the principal that closed the deal through the API, or `null` for the owner, who closes
+with `deal close`. `receipt` is the `close_deal` receipt, which
 `GET /api/v1/receipts/{receipt}` serves. `final_card` is the deal's newest card as it closed, or `null`
 for a deal that had none. A deal the connector closed on the CRM's closed stage has
 `basis` `crm_stage`, `outcome` `won` or `lost`, no `reason` and no `closed_by`, and its `final_card` is
@@ -178,6 +179,29 @@ an answer that fails then, as for a grant revoked in between, does not undo the 
 | `409 deal_changed` | The deal, or a match of its call or thread, changed while the card was read |
 | `422 evidence_refused` | The evidence failed a check, so no card was made |
 | `502 source_failed` | A read failed; its receipt says why |
+
+`POST /v1/deals/{id}/close` with `{"reason": "Renewed for two years"}` closes an open deal as the
+signed-in person. It works in two steps. It first makes the deal's final card exactly as a refresh makes
+a card, with the refresh's checks of the grant and its refusals above. It then closes the deal on that
+card under a `close_deal` receipt that names the person, the reason and the card, and checks the grant
+once more as that close commits. The answer is `200` and the deal as `GET /v1/deals/{id}` gives it then:
+closed, with its `close`.
+
+When the final card reads the deal's opportunity as closed in the CRM, the deal closes on that stage as
+the card is made. That close is the connector's: the answer shows `basis` `crm_stage`, the receipt names
+no person, and the reason sent is not recorded.
+
+| Refusal | When |
+| --- | --- |
+| `400 invalid_json` | The body is not one JSON object with `reason` as a string and no other member |
+| `400 invalid_reason` | `reason` is missing, or is not one line of 1 to 500 characters |
+| The refusals of a refresh | As above, before the final card is published. No card is published and nothing closes. |
+| `409 deal_changed`, saying the card stays | The deal got a newer card, or closed, after the final card was published. That card stays the deal's, and the deal is as the other change left it. |
+| `403 not_permitted`, after the card | The grant ended between the final card and the close. The card stays the deal's, the deal stays open, and the close's receipt is finished as error/403. |
+| `500 close_failed` | The final card was published and the deal could not be closed. The card stays. A refresh answers this too, when its card reads the opportunity as closed and the close on that stage fails. |
+
+A grant that ends just after the close commits can make the answer `403`, since the answer is read
+under the grant: the deal is closed all the same.
 
 ## Matches
 

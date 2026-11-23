@@ -90,9 +90,9 @@ Nothing below is started unless it says so. Each links to the guide that describ
 One rep reads one real renewal before a call.
 
 Started: a deal is registered by hand with `deal new` or `POST /v1/deals`, read with `deal list`,
-`deal show`, `GET /v1/deals` and `GET /v1/deals/{id}`, and closed with `deal close`, with a reason, a
-receipt and a final card, or by the CRM's closed stage as a card reads it, after which it leaves
-`deal list`, and `brief` makes
+`deal show`, `GET /v1/deals` and `GET /v1/deals/{id}`, and closed with `deal close` or
+`POST /v1/deals/{id}/close`, with a reason, a receipt and a final card, or by the CRM's closed stage as a
+card of `brief`, a refresh or a close reads it, after which it leaves the lists, and `brief` makes
 an account's card for its open deal ([one deal, one ID](api.md#one-deal-one-id)). People sign in through
 the company's identity provider and read the accounts `grant` gives them
 ([running it](operations.md#sign-in-through-your-identity-provider)). An imported call and a mapped thread
@@ -104,7 +104,6 @@ are matched to a deal of their account by time, and one that fits two deals wait
 - A call or thread that waits for a person, one a person rejected and one matched to another deal each saying so on the card in its own words.
 - The Deals page naming a deal by its deal ID, with the list in order of urgency and in its colours. Today the page lists accounts by name at `/deals/{account}`, with the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
-- A close by a signed-in person through the API. Today the owner closes a deal with `deal close`, and the connector closes one when a card of `brief`, a refresh or `deal close` reads its opportunity as closed in the CRM; a brief an assistant prepares closes none, and nothing reads the CRM on a schedule yet. The list of the API and of `list_deals` still gives closed deals, after the open ones.
 - Every call of a deal, whole. Today a card reads at most one imported excerpt per account, and a deal's card only when the excerpt is matched to that deal: up to 20 lines or cues unless a range is given, and at most 256 with the lines or cues beside them ([call transcripts](sources.md#how-a-file-is-read)).
 - On Salesforce, the still-open and close-date signals counted against a contract that has ended ([signals](cards.md#signals)).
 - A receipt when a card fails its seal.

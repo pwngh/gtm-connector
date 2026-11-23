@@ -984,9 +984,9 @@ func TestAClosedDealShowsItsCloseThroughTheRoutes(t *testing.T) {
 		t.Fatalf("GET /v1/deals/%s: %+v %+v", deal.ID, one.Deal, how)
 	}
 	var listed struct{ Deals []dealResult }
-	if err := json.Unmarshal(b.get("/v1/deals"), &listed); err != nil || len(listed.Deals) != 1 ||
+	if err := json.Unmarshal(b.get("/v1/deals?all=1"), &listed); err != nil || len(listed.Deals) != 1 ||
 		listed.Deals[0].Close == nil || text(listed.Deals[0].Close.Reason) != "Lost, see [link example.com]" {
-		t.Errorf("GET /v1/deals: %+v %v", listed, err)
+		t.Errorf("GET /v1/deals?all=1: %+v %v", listed, err)
 	}
 	if reply := b.send(http.MethodGet, "/api/v1/receipts/"+*how.Receipt, nil, nil); reply.StatusCode != http.StatusOK {
 		t.Errorf("the close's receipt, for a person granted the account: %d", reply.StatusCode)
@@ -1152,4 +1152,135 @@ func TestStageOutcome(t *testing.T) {
 			t.Errorf("%s: %q, not %q", record, got, want)
 		}
 	}
+}
+
+// A signed-in person closes a deal of an account they hold a grant on, with a reason: the route makes the
+// deal's final card as that person, closes the deal on it under a close_deal receipt that names them, and
+// answers the closed deal. A person with no grant, an unknown deal, a write without the CSRF token and a
+// closed deal are refused. A closed deal leaves the list, and all=1 lists it after the open ones.
+func TestAPersonClosesADealThroughTheRoute(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("outsider-password-0123456789-abcdef"))
+	outsider, err := d.owner.EnsureDemoPrincipal(ctx, d.workspace, "demo-outsider", "Demo outsider", digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, outsider.ID, "acc-001"); err != nil {
+		t.Fatal(err)
+	}
+	var deal dealResult
+	d.result(t, &deal, "deal", "new", "acc-003")
+	if code, _, stderr := d.read(t, "brief", "acc-003"); code != 0 {
+		t.Fatalf("brief: %s", stderr)
+	}
+	closes := func(status string) int {
+		return d.count(t, "SELECT count(*) FROM receipts WHERE tool = 'close_deal' AND status = $1", status)
+	}
+	cards := func() int { return d.count(t, "SELECT count(*) FROM deal_cards WHERE deal_ref = $1", deal.ID) }
+	b := signInToDemo(t, app)
+	o := signInAs(t, app, "demo-outsider", "outsider-password-0123456789-abcdef")
+	send := func(who *signedIn, path string, body any, header map[string]string) *http.Response {
+		raw, _ := json.Marshal(body)
+		sent := map[string]string{"Origin": who.origin, "X-CSRF-Token": who.csrf, "Content-Type": "application/json"}
+		for name, value := range header {
+			sent[name] = value
+		}
+		return who.send(http.MethodPost, path, raw, sent)
+	}
+	reason := map[string]string{"reason": " Renewed, see https://example.com/order "}
+	path := "/v1/deals/" + deal.ID + "/close"
+
+	// Refused, with the deal left open and no card made. A person with no grant gets one answer for the deal
+	// and for an unknown one, each under a refused read's receipt; a write without the CSRF token or from
+	// another origin is stopped before either.
+	answer := func(reply *http.Response) string {
+		body, _ := io.ReadAll(reply.Body)
+		reply.Body.Close()
+		return fmt.Sprintf("%d %s", reply.StatusCode, body)
+	}
+	ungranted, unknown := answer(send(o, path, reason, nil)), answer(send(o, "/v1/deals/nothing-2027-aaaaaa/close", reason, nil))
+	if ungranted != unknown || !strings.HasPrefix(ungranted, "403 ") || !strings.Contains(ungranted, `"not_permitted"`) {
+		t.Errorf("a deal with no grant answered %s, and an unknown deal %s", ungranted, unknown)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE principal_id = $1 AND tool = 'get_account'
+		AND status = 'error' AND http_status = 403 AND row_count = 0`, outsider.ID); n != 2 {
+		t.Errorf("the outsider's two refused closes left %d refused receipts, of 2", n)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE principal_id = $1 AND tool = 'get_account'
+		AND status = 'error' AND account_ref IS NULL AND arguments ->> 'deal' = 'nothing-2027-aaaaaa'`, outsider.ID); n != 1 {
+		t.Errorf("%d refused receipts name the unknown deal and no account, of 1", n)
+	}
+	settled := d.count(t, "SELECT count(*) FROM receipts")
+	for label, reply := range map[string]*http.Response{
+		"a write with no CSRF token":  send(b, path, reason, map[string]string{"X-CSRF-Token": "stale"}),
+		"a write from another origin": send(b, path, reason, map[string]string{"Origin": "https://elsewhere.example"}),
+	} {
+		reply.Body.Close()
+		if reply.StatusCode != http.StatusForbidden || d.count(t, "SELECT count(*) FROM receipts") != settled {
+			t.Errorf("%s: %d", label, reply.StatusCode)
+		}
+	}
+	if cards() != 1 || closes("ok") != 0 || d.count(t, "SELECT count(*) FROM deals WHERE state = 'closed'") != 0 {
+		t.Fatalf("after the refusals: %d cards, %d closes", cards(), closes("ok"))
+	}
+
+	reply := send(b, path, reason, nil)
+	var closed struct {
+		Deal dealResult
+		Card *struct{ ID string }
+	}
+	b.json(reply, &closed)
+	how := closed.Deal.Close
+	if reply.StatusCode != http.StatusOK || closed.Deal.State != "closed" || how == nil || how.Basis != "person" ||
+		text(how.Reason) != "Renewed, see [link example.com]" || text(how.ClosedBy) != principal.ID || how.Receipt == nil ||
+		closed.Card == nil || text(how.FinalCard) != closed.Card.ID || cards() != 2 {
+		t.Fatalf("POST %s: %d %+v %+v, %d cards", path, reply.StatusCode, closed.Deal, how, cards())
+	}
+	// The final card's reads and seal, and the close, name the person.
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE id = $1 AND tool = 'close_deal' AND status = 'ok'
+		AND principal_id = $2 AND arguments ->> 'final_card' = $3`, *how.Receipt, principal.ID, *how.FinalCard); n != 1 {
+		t.Errorf("the close's receipt does not name the person and the final card")
+	}
+	if n := d.count(t, `SELECT count(*) FROM card_reads cr JOIN receipts r ON r.id = cr.receipt_id
+		WHERE cr.card_id = $1 AND r.principal_id IS DISTINCT FROM $2`, *how.FinalCard, principal.ID); n != 0 {
+		t.Errorf("%d reads of the final card do not name the person", n)
+	}
+	if n := d.count(t, `SELECT count(*) FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
+		WHERE c.id = $1 AND r.principal_id = $2`, *how.FinalCard, principal.ID); n != 1 {
+		t.Errorf("the final card's seal does not name the person")
+	}
+	// Closed already: refused, and nothing more is read.
+	before := d.count(t, "SELECT count(*) FROM receipts")
+	if reply := send(b, path, reason, nil); reply.StatusCode != http.StatusConflict ||
+		d.count(t, "SELECT count(*) FROM receipts") != before {
+		t.Errorf("closing a closed deal: %d", reply.StatusCode)
+	}
+	// The closed deal leaves the list, which is then an empty array. With another deal open, the list holds
+	// that one, and all=1 the open deal and then the closed one.
+	if raw := strings.TrimSpace(string(b.get("/v1/deals"))); raw != `{"deals":[]}` {
+		t.Errorf("GET /v1/deals after the close: %s", raw)
+	}
+	var open dealResult
+	d.result(t, &open, "deal", "new", "acc-002")
+	var listed struct{ Deals []dealResult }
+	if err := json.Unmarshal(b.get("/v1/deals"), &listed); err != nil || len(listed.Deals) != 1 || listed.Deals[0].ID != open.ID {
+		t.Errorf("GET /v1/deals with one deal open: %+v %v", listed, err)
+	}
+	if err := json.Unmarshal(b.get("/v1/deals?all=1"), &listed); err != nil || len(listed.Deals) != 2 ||
+		listed.Deals[0].ID != open.ID || listed.Deals[1].ID != deal.ID {
+		t.Errorf("GET /v1/deals?all=1: %+v %v", listed, err)
+	}
+	d.everyToolIsNamed(t)
 }

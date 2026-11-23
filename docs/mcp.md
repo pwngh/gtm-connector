@@ -56,7 +56,7 @@ scope opens one source.
 | `list_opportunities` | `crm:read` | The opportunities of one account, or with no `account_id` those of every account the token may read. |
 | `read_call_notes` | `calls:read` | The account's demo call notes, or its imported transcript excerpt. |
 | `read_slack_messages` | `slack:read` | The account's demo Slack messages, or its mapped Slack thread. |
-| `list_deals` | `crm:read` | The deals of the accounts the token may read, open ones first and each group by ID. No source is read. |
+| `list_deals` | `crm:read` | The open deals of the accounts the token may read, by ID. A closed deal is not listed; `read_deal_card` still gives it by its ID. No source is read. |
 | `read_deal_card` | `crm:read`, and the scopes the card's content needs | One deal and its newest [card](cards.md), whole. No source is read. See [deals and their cards](#deals-and-their-cards). |
 | `prepare_renewal_brief` | `crm:read` | A Deal card, saved as a prepared brief. Served only with a [selection](#selections-and-the-two-brief-tools). |
 | `read_renewal_brief` | `crm:read`, and the scopes the brief's content needs | A prepared brief again, with no source read. Served only with a selection. |
