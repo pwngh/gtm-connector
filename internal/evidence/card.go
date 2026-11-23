@@ -880,6 +880,18 @@ func (c *card) calls(asOf time.Time) {
 		c.gap("calls_not_matched", "Calls: not read. The account's transcript is not matched to this card.", nil,
 			false, nil)
 		return
+	case "waiting":
+		c.gap("calls_not_matched", "Calls: not read. The account's transcript waits for a person to match it to a deal.",
+			nil, false, nil)
+		return
+	case "rejected":
+		c.gap("calls_not_matched", "Calls: not read. A person kept the account's transcript off every card.", nil,
+			false, nil)
+		return
+	case "other_deal":
+		c.gap("calls_not_matched", "Calls: not read. The account's transcript is matched to another deal of this account.",
+			nil, false, nil)
+		return
 	}
 	if len(notes) == 0 {
 		if imported {
@@ -969,6 +981,17 @@ func (c *card) slack(contacts []contact) {
 	case "not_matched":
 		c.gap("slack_not_matched", "Slack: not read. The account's thread is not matched to this card.", nil, false,
 			nil)
+		return
+	case "waiting":
+		c.gap("slack_not_matched", "Slack: not read. The account's thread waits for a person to match it to a deal.", nil,
+			false, nil)
+		return
+	case "rejected":
+		c.gap("slack_not_matched", "Slack: not read. A person kept the account's thread off every card.", nil, false, nil)
+		return
+	case "other_deal":
+		c.gap("slack_not_matched", "Slack: not read. The account's thread is matched to another deal of this account.", nil,
+			false, nil)
 		return
 	}
 	who := c.speakersOf("slack_backend")

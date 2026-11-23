@@ -156,7 +156,7 @@ func TestCallsAreMatchedToTheirDeal(t *testing.T) {
 		t.Errorf("the second deal's card: %s", gaps)
 	}
 	code, stdout, _ = d.read(t, with("brief", "acc-007")...)
-	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
+	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is matched to another deal of this account.\n") {
 		t.Errorf("the second deal's card as text:\n%s", stdout)
 	}
 	d.result(t, &shown, with("deal", "show", second.ID)...)
@@ -350,7 +350,7 @@ func TestMatchRoutesKeepTheGrants(t *testing.T) {
 		t.Errorf("deal decide of an unknown match: %s", message)
 	}
 	code, stdout, _ := d.read(t, "brief", "acc-007")
-	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
+	if code != 0 || !strings.Contains(stdout, "Calls: not read. A person kept the account's transcript off every card.\n") {
 		t.Errorf("the card after the rejection:\n%s", stdout)
 	}
 
@@ -516,7 +516,7 @@ func TestAMappedThreadIsMatchedToItsDeal(t *testing.T) {
 	}
 	code, stdout, stderr = d.line(t, "brief", c.account, "--as-of", "2027-01-15", "--state-dir", "threads")
 	if code != 0 || strings.Contains(stdout, "from one selected thread") ||
-		!strings.Contains(stdout, "Slack: not read. The account's thread is not matched to this card.\n") {
+		!strings.Contains(stdout, "Slack: not read. The account's thread waits for a person to match it to a deal.\n") {
 		t.Fatalf("the second deal's card while the thread waits: exit %d\n%s%s", code, stdout, stderr)
 	}
 	// A brief does not ask again, and neither does a second look.

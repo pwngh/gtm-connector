@@ -31,6 +31,7 @@ type matchGate struct {
 // allowed is whether the account's current item of a kind may be read, and the item. For a deal, the item
 // must be matched to it. With no deal, an item that waits for a person or was rejected is refused, and any
 // other is read and counted. An account with no item of the kind is read as before, and says so on the card.
+// A refusal says why, for the card to state: the item waits, a person rejected it, or it is on another deal.
 func (g *matchGate) allowed(ctx context.Context, account, kind string) (item string, err error) {
 	item, held, err := g.store.AccountItem(ctx, g.workspace, account, kind)
 	if err != nil || !held {
@@ -40,13 +41,18 @@ func (g *matchGate) allowed(ctx context.Context, account, kind string) (item str
 	switch {
 	case err != nil:
 		return "", err
-	case g.read.Ref == "" && decided && match.State != "matched":
-		return "", cards.ErrNotMatched
+	case decided && match.State == "waiting":
+		return "", cards.ErrItemWaiting
+	case decided && match.State == "rejected":
+		return "", cards.ErrItemRejected
 	case g.read.Ref == "":
 		g.read.Unmatched++
 		return item, nil
-	case !decided || match.State != "matched" || match.DealRef != g.read.Ref:
+	case !decided:
+		// Not decided yet, as when it arrived while the card was read.
 		return "", cards.ErrNotMatched
+	case match.DealRef != g.read.Ref:
+		return "", cards.ErrItemOtherDeal
 	}
 	g.read.Matches = append(g.read.Matches, match.ID)
 	return item, nil

@@ -101,7 +101,6 @@ are matched to a deal of their account by time, and one that fits two deals wait
 
 - The proof route of a deal ([deal routes](api.md#deal-routes)), and on the served routes the deal list's colour, `?status=needs_attention` and what changed. A deal that binds IDs of other tools than the CRM ([one deal, one ID](api.md#one-deal-one-id)), and `deal DEAL_ID` printing the card as [working a deal](deals.md) shows.
 - A live check of the sign-in against a hosted identity provider, such as Google Workspace, Microsoft Entra ID or Okta. The sign-in is built, and has run against the invented provider of its tests and, by hand, against Dex on one machine.
-- A call or thread that waits for a person, one a person rejected and one matched to another deal each saying so on the card in its own words.
 - The Deals page naming a deal by its deal ID, with the list in order of urgency and in its colours. Today the page lists accounts by name at `/deals/{account}`, with the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, beside what is new on the card since the one before it, which the delivery bodies already count. Marks for blockers and commitments ([working a deal](deals.md#the-card)).
 - Every call of a deal, whole. Today a card reads at most one imported excerpt per account, and a deal's card only when the excerpt is matched to that deal: up to 20 lines or cues unless a range is given, and at most 256 with the lines or cues beside them ([call transcripts](sources.md#how-a-file-is-read)).
