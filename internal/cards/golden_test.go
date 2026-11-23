@@ -37,7 +37,7 @@ var goldenSample = map[string][]string{
 		"grok/4 speaker names", "grok/6", "sol/1"},
 	"books_slack":      {"fable/8", "gemini/1"},
 	"slack_threads":    {"gemini/0", "gemini/1", "gemini/2", "gemini/6", "gemini/7", "gemini/10"},
-	"books_salesforce": {"fable/1", "fable/2", "grok/5", "grok/8"},
+	"books_salesforce": {"fable/1", "fable/2", "gemini/6", "grok/5", "grok/8"},
 }
 
 // wholeFamilies are the families every card of which is golden.

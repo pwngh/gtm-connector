@@ -261,7 +261,7 @@ func TestRecordedCards(t *testing.T) {
 		"their message's author, under no role", cards, sentences, cut, quoted)
 	t.Logf("by role: customer %d, seller %d, unknown %d", roles["customer"], roles["seller"], roles["unknown"])
 	t.Logf("unknown by reason: %v", reasons)
-	if cards != 90 {
-		t.Errorf("%d golden cards, want 90", cards)
+	if cards != 91 {
+		t.Errorf("%d golden cards, want 91", cards)
 	}
 }

@@ -472,8 +472,8 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 			signals++
 		}
 	}
-	if signals != 4 || golden != 4 {
-		t.Errorf("%d golden cards, %d of them with CRM signals; want 4 and 4", golden, signals)
+	if signals != 5 || golden != 5 {
+		t.Errorf("%d golden cards, %d of them with CRM signals; want 5 and 5", golden, signals)
 	}
 	if saved := d.count(t, `SELECT count(*) FROM cards c JOIN workspaces w ON w.id = c.workspace_id
 		WHERE w.slug = 'invented-books'`); saved != len(books) || len(books) != 78 {
@@ -777,5 +777,55 @@ func TestAccountsGivesOneShapeWithAndWithoutAQuery(t *testing.T) {
 		if at := slices.Index(c.tokens, "--query"); c.listed == 0 && strings.Contains(stderr, c.tokens[at+1]) {
 			t.Errorf("%v as text: stderr repeats the query: %q", c.tokens, stderr)
 		}
+	}
+}
+
+// On Salesforce, when every contract has ended and an opportunity is still open, the still-open signal counts
+// from the latest contract that ended and names its day, and the close-date signal counts from it too. With
+// no opportunity open, the card says only that the latest contract ended.
+func TestSignalsCountFromAContractThatHasEnded(t *testing.T) {
+	d := setUpDemo(t)
+	org, _, _ := inventedSalesforce(t)
+	where := []string{"--state-dir", "invented-books"}
+	if code, _, stderr := d.read(t, append([]string{"connect", "salesforce", "--org", salesforcetest.Alias,
+		"--environment", "production"}, where...)...); code != 0 {
+		t.Fatalf("connect: %s", stderr)
+	}
+	card := func(n string, closed bool) string {
+		rows, err := strictjson.LoadsText(fmt.Sprintf(`{"Account": [{"Id": "00100000000066%[1]sAAA", "Name": "Lapsed %[1]s",
+			"Industry": "Testing", "AccountNumber": null}], "Contact": [], "Contract": [
+			{"Id": "80000000000066%[1]sAAA", "AccountId": "00100000000066%[1]sAAA", "Status": "Activated", "StatusCode": "Activated",
+			 "StartDate": "2025-12-01", "ContractTerm": 12, "EndDate": "2026-11-30"},
+			{"Id": "80000000000055%[1]sAAA", "AccountId": "00100000000066%[1]sAAA", "Status": "Activated", "StatusCode": "Activated",
+			 "StartDate": "2024-12-01", "ContractTerm": 12, "EndDate": "2025-11-30"}], "Opportunity": [
+			{"Id": "00600000000066%[1]sAAA", "AccountId": "00100000000066%[1]sAAA", "Name": "Renewal", "StageName": "Negotiation",
+			 "Amount": {"decimal": "2500.00"}, "CloseDate": "2027-02-01", "IsClosed": %[2]t, "IsWon": false}]}`, n, closed))
+		if err != nil {
+			t.Fatal(err)
+		}
+		account := org.Add(rows.(*strictjson.Object))
+		code, stdout, stderr := d.read(t, append([]string{"brief", account, "--as-of", "2027-01-15"}, where...)...)
+		if code != 0 {
+			t.Fatalf("brief %s: exit %d\n%s", account, code, stderr)
+		}
+		return stdout
+	}
+	open := card("1", false)
+	for _, line := range []string{
+		`  The latest contract end date, 2026-11-30, passed 46 days ago and this opportunity is still open at stage "Negotiation". [`,
+		`  This open opportunity's close date, 2027-02-01, is after the contract end date, 2026-11-30. [`,
+		`  Contract end: Missing: no contract ends on or after 2027-01-15 [`,
+	} {
+		if !strings.Contains(open, line) {
+			t.Errorf("an open opportunity past the last contract's end: the card lacks %q\n%s", line, open)
+		}
+	}
+	if strings.Contains(open, "was 46 days ago") {
+		t.Errorf("the card also says the contract ended, in the weaker words:\n%s", open)
+	}
+	closed := card("2", true)
+	if !strings.Contains(closed, "  The latest contract end date, 2026-11-30, was 46 days ago. [") ||
+		strings.Contains(closed, "still open") || strings.Contains(closed, "is after the contract end date") {
+		t.Errorf("no open opportunity past the last contract's end:\n%s", closed)
 	}
 }

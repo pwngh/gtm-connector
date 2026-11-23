@@ -331,11 +331,11 @@ comes from.
 
 | Signal | When |
 | --- | --- |
-| The renewal is in N days (or is today, or passed N days ago) and this opportunity is still open at stage "S" | An opportunity is not closed, and the renewal date, or the Salesforce contract end, is 30 days away or less, or today. On the demo CRM it is also raised when the renewal date has passed. On Salesforce a contract that has ended is never the one the card counts to: when no contract ends on or after the planning date, the card has no contract end to count to, so neither this signal nor the close date signal is raised. The contract end signal below is raised then, if at least one contract ended before the planning date. More than five make one line that cites the first five and ends `and N more`. |
+| The renewal is in N days (or is today, or passed N days ago) and this opportunity is still open at stage "S" | An opportunity is not closed, and the renewal date, or the Salesforce contract end, is 30 days away or less, today, or past. On Salesforce the card counts to the earliest contract that ends on or after the planning date. When none does and at least one has ended, the signal counts from the latest that ended and names its day: `The latest contract end date, D, passed N days ago and this opportunity is still open at stage "S"`. The contract end's own line still says it is missing. More than five make one line that cites the first five and ends `and N more`. |
 | The renewal date passed N days ago | The demo CRM's renewal date is before the planning date and no opportunity is open. |
-| The latest contract end date, D, was N days ago | Salesforce returned no contract ending on or after the planning date, and at least one that ended before it. |
+| The latest contract end date, D, was N days ago | Salesforce returned no contract ending on or after the planning date, at least one that ended before it, and no opportunity that is still open. With one open, the first signal says it instead. |
 | CRM marks this account at risk | The demo CRM's risk status is `at_risk`. |
-| This open opportunity's close date, D, is after the renewal date, D | An opportunity that is not closed closes after the renewal date, or after the Salesforce contract end the card counts from. More than five make one line. |
+| This open opportunity's close date, D, is after the renewal date, D | An opportunity that is not closed closes after the renewal date, or after the Salesforce contract end the first signal counts from, which is the latest contract that ended when none ends on or after the planning date. More than five make one line. |
 | This contact has no role recorded | The contact has no title. More than five make one line that cites the first five and ends `and N more`. |
 | The latest dated call that was read is N days old | The newest call with a valid time, dated on or before the planning date, is more than 60 days old, counted from its UTC date. |
 
