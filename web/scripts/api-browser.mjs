@@ -1252,9 +1252,13 @@ await scenario('deals: keys and the filter', async () => {
   check(await tab.locator('.deals-back').isVisible() && await tab.locator('.deals-row').count() === 0, 'Enter opens the row; under 1100 the deal is the whole page, with a link back');
   await tab.click('.deals-back');
   await until(tab, () => location.pathname === '/deals' && document.querySelectorAll('.deals-row').length === 30);
+  // A new page moves focus to its heading twice: at once, when the link that was clicked is gone, and again in
+  // the next animation frame. Typing before that second move lands on the heading, which is what the failures
+  // in WebKit showed (the field empty, focus on the title). Two frames on, both moves are done.
+  await tab.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await tab.focus('input[name=q]');
   await tab.keyboard.type('thorn');
-  // This wait has timed out in WebKit a few times with no change to the page. When it does, say what the page held.
+  // When this wait times out, say what the page held.
   await until(tab, () => document.querySelectorAll('.deals-row').length === 1).catch(async error => {
     const held = await tab.evaluate(() => ({value: document.querySelector('input[name=q]')?.value, q: new URL(location.href).searchParams.get('q'),
       rows: document.querySelectorAll('.deals-row').length, focus: document.activeElement?.getAttribute('name') ?? document.activeElement?.className ?? document.activeElement?.tagName}));
